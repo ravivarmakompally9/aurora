@@ -217,6 +217,13 @@ def plan(key: str, today: date, fuel_l: float, resupply: date, extra_delay_days:
         actions.append({"key": a.key, "title": a.title, "detail": a.detail, "litres_saved": round(saved, 0),
                         "score_after": round(r["score"], 3)})
     actions.sort(key=lambda x: -x["litres_saved"])
+    combo = Action("all", "All of the above together", "Combined effect of every action in this list.",
+                   {k: v for a in ACTIONS for k, v in a.el_scale.items()},
+                   sum(a.heat_setpoint_drop_c for a in ACTIONS), float(np.prod([a.other_scale for a in ACTIONS])))
+    r = survival(key, today, fuel_l, resupply, extra_delay_days, "aurora", n, seed, action=combo, _cache=cache)
+    actions.append({"key": combo.key, "title": combo.title, "detail": combo.detail,
+                    "litres_saved": round(r["expected_at_arrival_l"] - base["expected_at_arrival_l"], 0),
+                    "score_after": round(r["score"], 3)})
     level = "ok" if base["score"] >= threshold else ("warning" if base["score"] >= 0.9 else "critical")
     # next order: one year of AURORA burn at P90 plus reserve, minus what remains at arrival
     year_burn = surrogate_year_burn(key, n, seed)
