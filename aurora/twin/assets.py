@@ -26,12 +26,12 @@ def solar_position(st: Station, index: pd.DatetimeIndex) -> pd.DataFrame:
     return _SOLPOS_CACHE[key]
 
 
-def pv_power(st: Station, wx: pd.DataFrame, ghi: np.ndarray | None = None) -> np.ndarray:
-    """AC output in kW. `ghi` overrides the weather column (used for forecasts)."""
+def pv_power(st: Station, wx: pd.DataFrame, ghi: np.ndarray | None = None, solpos: pd.DataFrame | None = None) -> np.ndarray:
+    """AC output in kW. `ghi` overrides the weather column; `solpos` supplies precomputed sun angles."""
     pv = st.pv
     if pv.kwp <= 0:
         return np.zeros(len(wx))
-    sp = solar_position(st, wx.index)
+    sp = solar_position(st, wx.index) if solpos is None else solpos
     ghi = wx["ghi_wm2"].to_numpy() if ghi is None else ghi
     zen = sp["zenith"].to_numpy()
     up = sp["elevation"].to_numpy() > 0.5
