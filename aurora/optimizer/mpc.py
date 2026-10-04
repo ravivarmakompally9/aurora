@@ -123,7 +123,7 @@ class AuroraController:
     def _replan(self, twin, t: int):
         out = self.f.forecast(twin, t, self.grid.H, 1, seed=self.seed + t)
         fc = {k: (v[0] if isinstance(v, np.ndarray) and v.ndim == 2 else v) for k, v in out.items()}
-        sa = storm.assess(self.st, fc, self.st.dt_h, float(twin.wx["wind10_ms"].iloc[t]))
+        sa = storm.assess(self.st, fc, self.st.dt_h, float(twin.wx["wind10_ms"].iloc[t]), was_active=self.mode == "storm")
         x = build_inputs(self.st, twin, t, fc, self.grid, sa)
         plan = self.milp.solve(x) if not self.force_fail else self.milp._failed("forced failure", 0.0, x)
         self.solve_times.append(plan.solve_s)

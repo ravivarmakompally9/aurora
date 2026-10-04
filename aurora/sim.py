@@ -63,7 +63,8 @@ def daily(st, lb: pd.DataFrame, la: pd.DataFrame) -> pd.DataFrame:
         "storm_h": ((la["mode"] == "storm") * dt).groupby(local(la)).sum(),
     })
     out.index.name = "date"
-    return out
+    steps = la.fuel_l.groupby(local(la)).size()
+    return out[steps.reindex(out.index).to_numpy() == st.steps_per_day]  # drop partial days at the UTC edges
 
 
 def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, replan_h: float = 3.0) -> dict:

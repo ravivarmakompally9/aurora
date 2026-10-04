@@ -1,0 +1,117 @@
+@import "tailwindcss";
+@import "@fontsource/barlow-condensed/500.css";
+@import "@fontsource/barlow-condensed/600.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+/* Layout: an instrument panel for polar night. Dark-first, glove-sized controls (NFR-09).
+   Fonts are bundled, so the dashboard works with no internet. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a1017;
+  --surface: #111a24;
+  --surface-2: #17222f;
+  --line: #243243;
+  --ink: #e9eff5;
+  --ink-2: #a9b6c4;
+  --muted: #7c8a9a;
+  --focus: #7fc8f8;
+  /* data series (validated dark steps) */
+  --s-battery: #3987e5;
+  --s-diesel: #d95926;
+  --s-wind: #199e70;
+  --s-solar: #c98500;
+  --s-heat: #d55181;
+  --s-boiler: #9085e9;
+  --s-load: #e9eff5;
+  --s-base: #7c8a9a;
+  /* status (fixed) */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef2f6;
+  --surface: #ffffff;
+  --surface-2: #f4f7fa;
+  --line: #d6dee7;
+  --ink: #0d1722;
+  --ink-2: #44515f;
+  --muted: #6b7887;
+  --focus: #1f6fbf;
+  --s-battery: #2a78d6;
+  --s-diesel: #eb6834;
+  --s-wind: #1baf7a;
+  --s-solar: #eda100;
+  --s-heat: #e87ba4;
+  --s-boiler: #4a3aa7;
+  --s-load: #0d1722;
+  --s-base: #8a96a3;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+.font-display { font-family: var(--font-display); letter-spacing: 0.01em; }
+.font-mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.label {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.btn {
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn:hover { border-color: var(--ink-2); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn-primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn-primary:hover { opacity: 0.9; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+input, select {
+  min-height: 48px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+}
+.recharts-cartesian-grid line { stroke: var(--line); }
+.recharts-text { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.recharts-tooltip-wrapper { outline: none; }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}

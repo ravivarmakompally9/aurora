@@ -36,13 +36,18 @@ class StormAssessment:
                 "peak_wind_ms": round(self.peak_wind_ms, 1), "message": self.message}
 
 
-def assess(st: Station, fc: dict, step_h: float, wind_now_ms: float) -> StormAssessment:
-    """`fc` holds 1-D forecast arrays for one issue time (storm_prob, wind10, hub_wind, lead_h)."""
+def assess(st: Station, fc: dict, step_h: float, wind_now_ms: float, was_active: bool = False) -> StormAssessment:
+    """`fc` holds 1-D forecast arrays for one issue time (storm_prob, wind10, hub_wind, lead_h).
+
+    Hysteresis: once active, Storm Mode stays on while the risk stays above END_PROB within 30 h,
+    so a storm hovering at the 24 h warning edge does not toggle the mode."""
     prob, wind10, hub = fc["storm_prob"], fc["wind10"], fc["hub_wind"]
     lead = np.arange(len(prob)) * step_h
     park = hub >= st.wind.cut_out_ms - PARK_MARGIN_MS
     now = wind_now_ms >= st.control.storm_wind_ms
     cand = np.flatnonzero((prob >= WARN_PROB) & (lead <= 24))
+    if was_active and not len(cand):
+        cand = np.flatnonzero((prob >= END_PROB) & (lead <= 30))
     if not now and not len(cand):
         return StormAssessment(False, None, None, None, float(prob.max(initial=0)), float(wind10.max(initial=0)), park,
                                "No blizzard expected in the next 24 h")

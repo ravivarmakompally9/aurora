@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aurora",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--project", "/Users/kompallyravivarma/Documents/aurora", "aurora", "serve", "--port", "8765"],
+      "port": 8765
+    },
+    {
+      "name": "dashboard-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/Users/kompallyravivarma/Documents/aurora/dashboard", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}

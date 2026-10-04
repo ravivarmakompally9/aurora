@@ -57,6 +57,7 @@ class LiveSession:
             self.shadow = Twin(st, wx=self.full.wx, demand=self.full.demand)
             self.t0 = self.t = int(self.twin.index.get_indexer([t_utc], method="nearest")[0])
             self.ctrl = AuroraController(st, self.f, blocks=LIVE_BLOCKS, replan_every=1)
+            self.ctrl.explainer.clock = self.display_time
             self.base = DieselFirst()
             self.validator = Validator()
             self.faults = SensorFaults()

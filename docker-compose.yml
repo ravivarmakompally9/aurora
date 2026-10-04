@@ -1,0 +1,33 @@
+# `docker compose up` runs AURORA on one edge PC (NFR-05). Not tested on the development Mac (no Docker there).
+# Optional services: `docker compose --profile broker up` adds Mosquitto for the MQTT link,
+# `--profile timeseries` adds TimescaleDB for production-scale storage.
+services:
+  aurora:
+    build: .
+    ports: ["8765:8765", "5020:5020"]
+    environment:
+      AURORA_STATION: bharati
+      AURORA_MODBUS: "1"
+    volumes:
+      - aurora-data:/app/data/processed
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    profiles: [broker]
+    ports: ["1883:1883"]
+    command: mosquitto -c /mosquitto-no-auth.conf
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    profiles: [timeseries]
+    environment:
+      POSTGRES_PASSWORD: aurora-dev-only
+      POSTGRES_DB: aurora
+    ports: ["5432:5432"]
+    volumes:
+      - tsdb:/var/lib/postgresql/data
+
+volumes:
+  aurora-data:
+  tsdb:

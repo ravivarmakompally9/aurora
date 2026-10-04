@@ -172,7 +172,7 @@ class Forecaster:
         out["forecast_mean_kw"] = float(base)
         out["temp_fc_c"] = float(np.mean(w["temp"]))
         out["wind_chill_fc_c"] = float(np.mean(X["wind_chill"]))
-        out["crew"] = float(X["crew"].mean())
+        out["crew_now"] = float(X["crew"].mean())
         out["crew_ref"] = float(self.reference[target]["crew"])
         return out
 

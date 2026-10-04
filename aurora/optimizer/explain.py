@@ -21,10 +21,13 @@ class Explainer:
         self.cards: list[dict] = []
         self.summary: dict = {}
         self.last_p2h_on = False
-        self.last_water_on = False
+        self.last_water_day = -1
+        self.clock = None  # optional step -> display timestamp (the live session shifts to the scenario year)
 
     def _local(self, twin, t: int):
         import pandas as pd
+        if self.clock is not None:
+            return self.clock(t)
         return twin.index[min(t, twin.n - 1)] + pd.Timedelta(hours=self.st.utc_offset_h)
 
     def card(self, twin, t, level, title, reason, fuel_l=None, kind="action"):
@@ -99,8 +102,15 @@ class Explainer:
                       f"Off for about {hrs:.1f} h.", fuel_l=g.a * g.rated_kw * hrs)
         if started and sp.source == "aurora":
             g = gens[started[0]]
-            if sp.mode == "storm":
+            standby = False
+            p = getattr(self, "_ctrl", None)
+            if p is not None and p.plan is not None:
+                standby = p.plan.inputs.min_units[p.plan_step(t)] > 0
+            if sp.mode == "storm" and standby:
                 why = "Standby unit for the blizzard: keeps reserve if the wind turbines park."
+                fuel = None
+            elif sp.mode == "storm" and sp.batt_kw > 1:
+                why = f"Pre-charging the battery (now {soc:.0%}) and heating the thermal tank before the blizzard."
                 fuel = None
             elif sp.batt_kw > 1:
                 pct = 100 * sum(sp.gen_kw) / max(sum(gens[i].rated_kw for i in np.flatnonzero(now)), 1)
@@ -119,18 +129,19 @@ class Explainer:
                       fuel_l=boiler_l)
         self.last_p2h_on = p2h_on
         water_on = sp.water_kw > 0.25 * st.loads["electric"]["tier1_life_support"]["water_max_kw"]
-        if water_on and not self.last_water_on and sp.source == "aurora":
+        if water_on and self.last_water_day != twin.day_id[t] and sp.source == "aurora":
+            self.last_water_day = twin.day_id[t]
             surplus = max(0.0, ren - twin.el_fixed[t])
             self.card(twin, t, "advisory", "Water production window",
                       f"Running the water plant now ({sp.water_kw:.0f} kW): "
                       + (f"{surplus:.0f} kW renewable surplus available." if surplus > 5 else "generator has spare efficient capacity."),
                       fuel_l=None, kind="schedule")
-        self.last_water_on = water_on
 
     def _off_hours(self, twin, t, g) -> float:
         return 0.25  # refined by the controller's plan below when available
 
     def bind_plan_lookup(self, ctrl):
+        self._ctrl = ctrl
         def off_hours(twin, t, g):
             p = ctrl.plan
             if p is None:
@@ -154,13 +165,15 @@ def drivers_text(d: dict) -> list[str]:
     if not d:
         return []
     out = []
+    if not any(abs(d.get(k, 0)) >= 1 for k in ("weather", "crew", "experiments")):
+        return [f"close to a typical day ({d['forecast_mean_kw']:.0f} kW average)"]
     w = d.get("weather", 0)
     if abs(w) >= 1:
         out.append(f"{'+' if w > 0 else '-'}{abs(w):.0f} kW from weather (wind chill {d['wind_chill_fc_c']:.0f} °C)")
     c = d.get("crew", 0)
     if abs(c) >= 1:
-        diff = d["crew"] - d["crew_ref"]
-        out.append(f"{'+' if c > 0 else '-'}{abs(c):.0f} kW from crew ({d['crew']:.0f} on station, {diff:+.0f} vs typical)")
+        diff = d["crew_now"] - d["crew_ref"]
+        out.append(f"{'+' if c > 0 else '-'}{abs(c):.0f} kW from crew ({d['crew_now']:.0f} on station, {diff:+.0f} vs typical)")
     e = d.get("experiments", 0)
     if abs(e) >= 1:
         out.append(f"{'+' if e > 0 else '-'}{abs(e):.0f} kW from scheduled experiments")
