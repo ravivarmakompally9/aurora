@@ -11,14 +11,14 @@ station:
   utc_offset_h: 1          # station clock used for calendar features (illustrative)
 
 gensets:                   # Willans-line fuel curve: L/h = a * rated_kw * on + b * P
-  - {id: G1, rated_kw: 250, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
-  - {id: G2, rated_kw: 250, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
-  - {id: G3, rated_kw: 250, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
+  - {id: G1, rated_kw: 200, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
+  - {id: G2, rated_kw: 200, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
+  - {id: G3, rated_kw: 200, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
 genset_start_cost_l: 4.0   # fuel-equivalent cost of one start (wear, cold-start enrichment)
 diesel_kwh_per_l: 10.0     # lower heating value used for heat recovery and boiler
 
 pv:
-  kwp: 150
+  kwp: 80
   tilt_deg: 65             # steep tilt suits low sun and sheds snow
   azimuth_deg: 0           # north-facing (southern hemisphere)
   albedo: 0.8              # snow ground reflectance
