@@ -1,0 +1,21 @@
+{
+  "source": "NASA POWER hourly API",
+  "url": "https://power.larc.nasa.gov/api/temporal/hourly/point",
+  "community": "RE",
+  "lat": -69.41,
+  "lon": 76.19,
+  "years": [
+    2021,
+    2022,
+    2023
+  ],
+  "parameters": [
+    "T2M",
+    "WS10M",
+    "WS50M",
+    "ALLSKY_SFC_SW_DWN",
+    "CLRSKY_SFC_SW_DWN",
+    "PS",
+    "RH2M"
+  ]
+}

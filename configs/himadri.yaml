@@ -1,0 +1,114 @@
+# Himadri-like station configuration (modelled as an islanded microgrid).
+# ILLUSTRATIVE VALUES: representative of a mid-size polar station, not NCPOR's official equipment list.
+# Swap this file for real station data without code changes (NFR-11).
+
+station:
+  key: himadri
+  name: Himadri
+  location: Ny-Alesund, Svalbard (Arctic)
+  lat: 78.92
+  lon: 11.93
+  utc_offset_h: 1          # station clock used for calendar features (illustrative)
+
+gensets:                   # Willans-line fuel curve: L/h = a * rated_kw * on + b * P
+  - {id: G1, rated_kw: 40, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
+  - {id: G2, rated_kw: 40, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
+genset_start_cost_l: 4.0   # fuel-equivalent cost of one start (wear, cold-start enrichment)
+diesel_kwh_per_l: 10.0     # lower heating value used for heat recovery and boiler
+
+pv:
+  kwp: 30
+  tilt_deg: 65             # steep tilt suits low sun and sheds snow
+  azimuth_deg: 180         # south-facing (northern hemisphere)
+  albedo: 0.8              # snow ground reflectance
+  temp_coeff: -0.004
+  system_derate: 0.90
+
+wind:
+  turbines: 1
+  rated_kw: 20             # per turbine, cold-climate model
+  hub_height_m: 18
+  cut_in_ms: 3.0
+  rated_ms: 12.0
+  cut_out_ms: 25.0
+
+battery:
+  capacity_kwh: 80
+  power_kw: 30
+  eta_charge: 0.95
+  eta_discharge: 0.95
+  soc_min: 0.20
+  soc_max: 0.95
+  soc_emergency: 0.15      # guardrail hard floor
+  enclosure_min_c: 5.0     # heated enclosure; capacity derates if it falls below this
+  wear_l_per_kwh: 0.01     # degradation cost in fuel-equivalent litres per kWh throughput
+
+thermal_tank:
+  capacity_kwh: 150
+  max_charge_kw: 50
+  max_discharge_kw: 50
+  loss_per_h: 0.004        # fraction of stored heat lost per hour
+  soc_min: 0.05
+
+p2h:
+  max_kw: 30
+  efficiency: 0.98
+
+boiler:
+  max_kw: 60
+  efficiency: 0.85
+
+loads:
+  crew:
+    summer: 12
+    winter: 4
+    summer_start: "04-01"  # month-day
+    summer_end: "09-30"
+  heat:
+    ua_kw_per_k: 0.55       # building heat-loss coefficient
+    indoor_c: 20.0
+    wind_infiltration: 0.02  # extra loss per m/s of wind
+    hot_water_kw_per_person: 0.35
+    min_share_tier1: 0.7   # share of heat demand that is life-support (habitable minimum)
+  electric:
+    tier1_life_support:
+      ventilation_kw: 1.5
+      ventilation_kw_per_person: 0.15
+      medical_fire_kw: 0.6
+      galley_kw_per_person_meal: 0.45
+      water_kwh_base: 20  # daily water production energy (RO / snow melter)
+      water_kwh_per_person: 4
+      water_max_kw: 12
+    tier2_comms_safety:
+      constant_kw: 2.0
+    tier3_science:
+      constant_kw: 2.5
+      experiments_per_week: 2
+      experiment_kw: [3, 6]
+      experiment_hours: [3, 6]
+    tier4_comfort:
+      kw_per_person_active: 0.55
+      laundry_kwh_per_person_week: 3.0
+      laundry_max_kw: 4
+
+fuel:
+  tank_capacity_kl: 60
+  on_hand_kl: 9          # scenario input, editable from the dashboard (FR-03)
+  safety_reserve_kl: 3
+  other_use_l_per_day: 15 # vehicles, incinerator: outside the energy system, same for both strategies
+  resupply_date: "2026-11-12"
+  co2_kg_per_l: 2.68
+
+control:
+  step_min: 15
+  horizon_h: 48
+  storm_wind_ms: 20.0      # Storm Mode trigger on forecast wind within 24 h
+  storm_soc_target: 0.85
+  storm_tank_target: 0.80
+  reserve_frac_load: 0.10
+
+weather:
+  years: [2021, 2022, 2023]
+  train_year: 2021
+  val_year: 2022
+  test_year: 2023
