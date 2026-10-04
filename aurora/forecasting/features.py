@@ -31,15 +31,15 @@ def wind_chill(t_c, v_ms):
 
 
 def target_index(t0: np.ndarray, horizon: int, stride: int) -> np.ndarray:
-    """(n_issue, horizon) array of step indices t0 + stride*(k+1)."""
-    return t0[:, None] + stride * (np.arange(horizon)[None, :] + 1)
+    """(n_issue, horizon) array of step indices t0 + stride*k; step 0 is the current step."""
+    return t0[:, None] + stride * np.arange(horizon)[None, :]
 
 
 def nwp(twin, t0: np.ndarray, horizon: int, stride: int, seed: int = 0) -> dict[str, np.ndarray]:
     """Synthetic NWP issued at each t0 for `horizon` steps of `stride` twin steps."""
     st = twin.st
     idx = np.minimum(target_index(t0, horizon, stride), twin.n - 1)
-    lead_h = (idx - t0[:, None]) * st.dt_h
+    lead_h = (idx - t0[:, None]) * st.dt_h + st.dt_h  # the current step is still a short-range forecast
     rho = np.exp(-stride * st.dt_h / 12.0)
     rng = np.random.default_rng([seed, int(t0[0]), len(t0)])
     z = rng.standard_normal((3, len(t0), horizon))

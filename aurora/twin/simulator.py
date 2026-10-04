@@ -104,6 +104,18 @@ class Twin:
             self.wx = inject_blizzard(self.st, self.wx, self.index[t], hours, kw.get("peak_ms", 32.0))
             self.demand = self.demand.copy()
             self._refresh_weather_dependent()
+        elif kind == "wind_surplus":
+            # strong steady wind below cut-out (scenario E): surplus that should become heat, not curtailment
+            n = int(hours / self.st.dt_h)
+            wx = self.wx.copy()
+            sl = slice(t, min(t + n, self.n))
+            col = wx.columns.get_loc
+            wx.iloc[sl, col("wind10_ms")] = np.maximum(wx["wind10_ms"].to_numpy()[sl], kw.get("speed_ms", 14.0))
+            wx.iloc[sl, col("wind50_ms")] = wx["wind10_ms"].to_numpy()[sl] * 1.2
+            from aurora.twin.weather import add_derived
+            self.wx = add_derived(self.st, wx.drop(columns=["storm", "panel_clear", "local_hour", "local_date"]))
+            self.demand = self.demand.copy()
+            self._refresh_weather_dependent()
         elif kind == "generator_failure":
             g = kw.get("gen", 1)
             self.gen_trip_until[g] = t + int(hours / self.st.dt_h)

@@ -18,7 +18,7 @@ def evaluate(f: Forecaster, twin, year: int, every_h: float = 6, horizon_h: floa
     st = twin.st
     steps = np.flatnonzero(twin.index.year == year)
     t0 = steps[steps < twin.n - int(horizon_h / st.dt_h) - 1][:: int(every_h / st.dt_h)]
-    H = int(horizon_h / st.dt_h)
+    H = int(horizon_h / st.dt_h) + 1
     res = {"year": year, "issues": int(len(t0))}
     chunks = [t0[i:i + 120] for i in range(0, len(t0), 120)]
     acc = {k: [] for k in ("idx", "lead_h", "load_p10", "load_p50", "load_p90", "heat_p10", "heat_p50", "heat_p90",
@@ -29,7 +29,7 @@ def evaluate(f: Forecaster, twin, year: int, every_h: float = 6, horizon_h: floa
             acc[k].append(out[k])
     a = {k: np.concatenate(v) for k, v in acc.items()}
     idx = a["idx"]
-    k24 = int(24 / st.dt_h) - 1
+    k24 = int(24 / st.dt_h)
     for name, truth in (("load", twin.el_fixed), ("heat", twin.heat)):
         y = truth[idx]
         ape = np.abs(y - a[f"{name}_p50"]) / np.maximum(y, 1e-6)
