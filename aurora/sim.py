@@ -6,6 +6,7 @@ Months run in parallel processes; each month starts both strategies from the sam
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import logging
@@ -23,6 +24,7 @@ from aurora.optimizer.mpc import YEAR_BLOCKS, AuroraController
 from aurora.twin.baseline import DieselFirst
 from aurora.twin.kpi import compare, kpis
 from aurora.twin.simulator import Twin
+from aurora.twin.weather import load_weather
 
 log = logging.getLogger(__name__)
 
@@ -33,22 +35,63 @@ def _month_bounds(tw: Twin, year: int, month: int) -> tuple[int, int]:
     return int(sel[0]), int(sel[-1]) + 1
 
 
+def apply_overrides(st, overrides: dict | None):
+    """Return a copy of the station with fields changed. Keys may be dotted: "pv.kwp", "loads.crew.summer"."""
+    if not overrides:
+        return st
+    for key, val in overrides.items():
+        head, *rest = key.split(".")
+        if not rest:
+            st = dataclasses.replace(st, **{head: val})
+            continue
+        sub = getattr(st, head)
+        if dataclasses.is_dataclass(sub):
+            sub = dataclasses.replace(sub, **{rest[0]: val})
+        else:  # nested dict such as loads
+            sub = copy.deepcopy(sub)
+            node = sub
+            for k in rest[:-1]:
+                node = node[k]
+            node[rest[-1]] = val
+        st = dataclasses.replace(st, **{head: sub})
+    return st
+
+
 def _station(key: str, overrides: dict | None):
-    st = load_station(key)
-    return dataclasses.replace(st, **overrides) if overrides else st
+    return apply_overrides(load_station(key), overrides)
+
+
+def scenario_twin(st, scenario: dict | None) -> Twin:
+    """Twin over all weather years, with optional scenario weather changes (e.g. a colder year)."""
+    sc = scenario or {}
+    if sc.get("temp_shift_c"):
+        wx = load_weather(st).copy()
+        wx["temp_c"] = wx["temp_c"] + sc["temp_shift_c"]
+        return Twin(st, wx=wx)
+    return Twin(st)
+
+
+def scenario_forecaster(key: str, st, scenario: dict | None, tag: str):
+    """Default forecaster, or one retrained on the scenario's own history (e.g. a different crew size)."""
+    if (scenario or {}).get("retrain"):
+        return load_or_train(scenario_twin(st, scenario), tag=tag)
+    return load_or_train(Twin(load_station(key)))
 
 
 def _run_month(args):
-    key, year, month, replan_h, overrides = args
+    key, year, month, replan_h, overrides, scenario, tag = args
+    sc = scenario or {}
+    from aurora.forecasting import features as fx
+    fx.NWP_ERROR_SCALE = float(sc.get("nwp_error_scale", 1.0))
     st = _station(key, overrides)
-    f = load_or_train(Twin(st))
+    f = scenario_forecaster(key, st, scenario, tag)
     t_start = time.time()
-    tb = Twin(st)
+    tb = scenario_twin(st, scenario)
     t0, t1 = _month_bounds(tb, year, month)
     lb = tb.run(DieselFirst(), t0, t1)
-    ta = Twin(st)
+    ta = scenario_twin(st, scenario)
     ctrl = AuroraController(st, f, blocks=YEAR_BLOCKS, replan_every=int(replan_h / st.dt_h), time_limit_s=10,
-                            mip_gap=0.02, threads=1, seed=month)
+                            mip_gap=0.02, threads=1, seed=month, features=sc.get("features"))
     la = ta.run(ctrl, t0, t1)
     return {"month": month, "base": lb, "aurora": la, "cards": ctrl.explainer.cards,
             "solve_mean_s": float(np.mean(ctrl.solve_times)), "solve_max_s": float(np.max(ctrl.solve_times)),
@@ -80,16 +123,18 @@ def daily(st, lb: pd.DataFrame, la: pd.DataFrame) -> pd.DataFrame:
 
 
 def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, replan_h: float = 3.0,
-             overrides: dict | None = None, tag: str = "") -> dict:
-    """`overrides` changes station fields for an experiment (e.g. genset_min_up_h); `tag` keeps its outputs separate."""
+             overrides: dict | None = None, tag: str = "", scenario: dict | None = None,
+             out_dir=None, months=range(1, 13)) -> dict:
+    """`overrides` changes station fields and `scenario` the conditions (features, temp_shift_c,
+    nwp_error_scale, retrain) for an experiment; `tag` keeps its outputs separate."""
     st = _station(key, overrides)
     year = year or st.test_year
-    load_or_train(Twin(st))  # make sure the model is cached before workers start
+    scenario_forecaster(key, st, scenario, tag)  # make sure the model is cached before workers start
     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
         os.environ[var] = "1"  # one process per core; avoid thread oversubscription in the workers
     t = time.time()
     with ProcessPoolExecutor(max_workers=workers) as ex:
-        parts = sorted(ex.map(_run_month, [(key, year, m, replan_h, overrides) for m in range(1, 13)]),
+        parts = sorted(ex.map(_run_month, [(key, year, m, replan_h, overrides, scenario, tag) for m in months]),
                        key=lambda r: r["month"])
     lb = pd.concat([p["base"] for p in parts])
     la = pd.concat([p["aurora"] for p in parts])
@@ -98,6 +143,7 @@ def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, r
         "station": key, "year": year, "simulated": True, "wall_s": round(time.time() - t, 1),
         "replan_every_h": replan_h, "plan_grid": "hourly x 48 h",
         "genset_min_up_h": st.genset_min_up_h, "start_cost_l": st.genset_start_cost_l + st.genset_start_wear_l,
+        "tag": tag, "overrides": overrides or {}, "scenario": scenario or {},
         "solver": {"solves": sum(p["solves"] for p in parts), "failures": sum(p["failures"] for p in parts),
                    "mean_s": round(float(np.mean([p["solve_mean_s"] for p in parts])), 3),
                    "max_s": round(max(p["solve_max_s"] for p in parts), 2)},
@@ -108,7 +154,8 @@ def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, r
     cards = [c for p in parts for c in p["cards"]]
     with open(proc / f"year_{key}_{year}{tag}_logs.pkl", "wb") as fh:  # save the expensive part first
         pickle.dump({"base": lb, "aurora": la, "cards": cards}, fh)
-    out_json = ROOT / "docs" / f"year_{key}_{year}{tag}.json"
+    out_json = (out_dir or ROOT / "docs") / f"year_{key}_{year}{tag}.json"
+    out_json.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(json.dumps(result, indent=2, default=float))
     daily(st, lb, la).to_csv(proc / f"year_{key}_{year}{tag}_daily.csv")
     return result

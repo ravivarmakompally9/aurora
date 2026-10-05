@@ -1,6 +1,6 @@
 """Capture dashboard screenshots for the PPT via headless Chrome (DevTools protocol).
 
-Usage: uv run python scripts/screenshots.py [--url http://127.0.0.1:8765] [--theme dark|light]
+Usage: uv run python scripts/screenshots.py [--url http://127.0.0.1:8765] [--width 1440] [--tag _tablet]
 Needs the API running (`uv run aurora serve`) and Google Chrome installed.
 """
 import argparse
@@ -51,7 +51,8 @@ async def shoot(url: str, theme: str, width: int, height: int, wait_s: float, ta
             for tab in TABS:
                 await cmd("Page.navigate", url=f"{url}/?t={time.time()}#{tab}")
                 await asyncio.sleep(1.0)
-                await cmd("Runtime.evaluate", expression=f"localStorage.setItem('aurora-theme','{theme}'); document.documentElement.dataset.theme='{theme}'")
+                await cmd("Runtime.evaluate", expression=f"localStorage.setItem('aurora-theme','{theme}'); document.documentElement.dataset.theme='{theme}';"
+                          "localStorage.setItem('aurora-seen-help','1'); localStorage.setItem('aurora-tour-hidden','true')")
                 await cmd("Page.reload")
                 await asyncio.sleep(wait_s)
                 h = (await cmd("Runtime.evaluate", expression="document.documentElement.scrollHeight", returnByValue=True))["result"]["value"]
@@ -69,7 +70,7 @@ async def shoot(url: str, theme: str, width: int, height: int, wait_s: float, ta
 if __name__ == "__main__":
     a = argparse.ArgumentParser()
     a.add_argument("--url", default="http://127.0.0.1:8765")
-    a.add_argument("--theme", default="dark")
+    a.add_argument("--theme", default="light")  # the dashboard is light-only
     a.add_argument("--width", type=int, default=1440)
     a.add_argument("--height", type=int, default=900)
     a.add_argument("--wait", type=float, default=5.0)

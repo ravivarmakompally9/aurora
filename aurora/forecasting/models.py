@@ -185,12 +185,12 @@ class Forecaster:
         return path
 
 
-def load_or_train(twin, retrain: bool = False) -> Forecaster:
+def load_or_train(twin, retrain: bool = False, tag: str = "") -> Forecaster:
     """Operational forecaster: train on the training year, conformal-calibrate on the validation year.
 
     `twin` must cover all weather years (Twin(st) with no start/end)."""
     st = twin.st
-    path = DATA_DIR / "processed" / f"forecaster_{st.key}.pkl"
+    path = DATA_DIR / "processed" / f"forecaster_{st.key}{tag}.pkl"
     if path.exists() and not retrain:
         with open(path, "rb") as fh:
             return pickle.load(fh)

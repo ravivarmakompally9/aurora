@@ -23,7 +23,8 @@ class Guardrail:
     def __init__(self, st: Station):
         self.st = st
         el = st.loads["electric"]
-        self.largest_step = float(max(el["tier1_life_support"]["water_max_kw"], max(el["tier3_science"]["experiment_kw"])))
+        # largest load that can switch on unexpectedly (the water plant is scheduled, so it is not a surprise step)
+        self.largest_step = float(max(el["tier3_science"]["experiment_kw"]))
         self.degraded = False  # set by the data hub when a critical sensor is bad: widen the reserve (PRD §11.3)
 
     def validate(self, twin, t: int, sp: Setpoint) -> tuple[Setpoint, list[dict]]:

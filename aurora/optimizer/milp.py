@@ -57,6 +57,7 @@ class PlanInputs:
     min_on: np.ndarray          # per-step units that must stay on because they started less than min-up ago
     reserve: np.ndarray         # spinning reserve requirement kW
     turbines_on: np.ndarray     # 0/1
+    features: dict | None = None  # analysis switches: battery / tank / p2h scheduling on or off (default all on)
 
 
 @dataclass
@@ -139,6 +140,8 @@ class DispatchMILP:
         m.minon = pe.Param(m.T, mutable=True, initialize=0.0)
         m.reserve = pe.Param(m.T, mutable=True, initialize=0.0)
         m.turb = pe.Param(m.T, mutable=True, initialize=1.0)
+        for name in ("batt_on", "tank_on", "p2h_on"):  # analysis switches (1 = AURORA may use it)
+            setattr(m, name, pe.Param(mutable=True, initialize=1.0))
 
         rated, pmin = g0.rated_kw, g0.min_load * g0.rated_kw
         fa, fb = g0.a * g0.rated_kw, g0.b
@@ -163,6 +166,7 @@ class DispatchMILP:
         m.dump = pe.Var(m.T, within=pe.NonNegativeReals)
         m.hunserved = pe.Var(m.T, within=pe.NonNegativeReals)
         m.curt = pe.Var(m.T, within=pe.NonNegativeReals)
+        m.edump = pe.Var(m.T, within=pe.NonNegativeReals)  # dump load: surplus generator output that has nowhere to go
         m.water = pe.Var(m.T, bounds=(0, wmax))
         m.laundry = pe.Var(m.T, bounds=(0, lmax))
         m.shed = pe.Var(m.K, m.T, within=pe.NonNegativeReals)
@@ -186,13 +190,18 @@ class DispatchMILP:
         m.c_minup = pe.Constraint(m.T, rule=lambda m, t: m.n[t] >= m.minon[t] + sum(m.s[k] for k in window[t])
                                   if up > 0 else pe.Constraint.Skip)
 
+        m.c_sw_ch = pe.Constraint(m.T, rule=lambda m, t: m.ch[t] <= b.power_kw * m.batt_on)
+        m.c_sw_dis = pe.Constraint(m.T, rule=lambda m, t: m.dis[t] <= b.power_kw * m.batt_on)
+        m.c_sw_tch = pe.Constraint(m.T, rule=lambda m, t: m.tch[t] <= tk.max_charge_kw * m.tank_on)
+        m.c_sw_tdis = pe.Constraint(m.T, rule=lambda m, t: m.tdis[t] <= tk.max_discharge_kw * m.tank_on)
+        m.c_sw_p2h = pe.Constraint(m.T, rule=lambda m, t: m.p2h[t] <= st.p2h_max_kw * m.p2h_on)
         m.c_curt = pe.Constraint(m.T, rule=lambda m, t: m.curt[t] <= m.pv[t] + m.wind[t] * m.turb[t])
         m.c_shed = pe.Constraint(m.K, m.T, rule=lambda m, k, t: m.shed[k, t] <= m.tier[k, t])
         m.c_t1 = pe.Constraint(m.T, rule=lambda m, t: m.t1unserved[t] <= m.el[t])
         m.c_el = pe.Constraint(m.T, rule=lambda m, t:
                                m.p[t] + m.pv[t] + m.wind[t] * m.turb[t] - m.curt[t] + m.dis[t]
                                == m.el[t] - sum(m.shed[k, t] for k in m.K) - m.t1unserved[t]
-                               + m.water[t] + m.laundry[t] + m.ch[t] + m.p2h[t])
+                               + m.water[t] + m.laundry[t] + m.ch[t] + m.p2h[t] + m.edump[t])
         m.c_heat = pe.Constraint(m.T, rule=lambda m, t:
                                  hr * (fa * m.n[t] + fb * m.p[t]) + st.p2h_eff * m.p2h[t] + m.tdis[t] + m.boiler[t]
                                  + m.hunserved[t] == m.heat[t] + m.tch[t] + m.dump[t])
@@ -232,7 +241,7 @@ class DispatchMILP:
             + sum(wear * (m.ch[t] + m.dis[t]) * dt[t] for t in m.T)
             + sum(SHED_WEIGHT[k] * m.shed[k, t] * dt[t] for k in m.K for t in m.T)
             + sum((TIER1_WEIGHT * m.t1unserved[t] + HEAT_UNSERVED_WEIGHT * m.hunserved[t]) * dt[t] for t in m.T)
-            + sum((0.001 * m.curt[t] + 1e-4 * m.dump[t]) * dt[t] for t in m.T)
+            + sum((0.001 * m.curt[t] + 1e-4 * m.dump[t] + 0.01 * m.edump[t]) * dt[t] for t in m.T)
             + SOC_SLACK_WEIGHT * sum(m.socslack[t] + 0.2 * m.tankslack[t] for t in m.T1)
             + RESERVE_SHORT_WEIGHT * sum(m.resshort[t] * dt[t] for t in m.T)
             + sum(WATER_SHORT_WEIGHT * m.wshort[d] + SHED_WEIGHT["el_tier4_kw"] * m.lshort[d] for d in m.D)
@@ -262,6 +271,10 @@ class DispatchMILP:
         for d in range(MAX_DAYS):
             m.wreq[d] = float(x.water_req[d]); m.wcap[d] = float(x.water_cap[d])
             m.lreq[d] = float(x.laundry_req[d]); m.lcap[d] = float(x.laundry_cap[d])
+        fe = x.features or {}
+        m.batt_on = 1.0 if fe.get("battery", True) else 0.0
+        m.tank_on = 1.0 if fe.get("tank", True) else 0.0
+        m.p2h_on = 1.0 if fe.get("p2h", True) else 0.0
         b = self.st.battery
         m.soc0 = float(np.clip(x.soc0_kwh, b.soc_emergency * b.capacity_kwh, b.soc_max * b.capacity_kwh))
         m.tank0 = float(np.clip(x.tank0_kwh, 0, self.st.tank.capacity_kwh))

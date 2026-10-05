@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { fmt, notify, post, usePoll, withProgress } from '../api'
+import { fmt, notify, post, usePoll, withProgress, type Overview } from '../api'
+import { armImpact, confirmImpact } from '../impact'
 import { Icon, IconBadge } from '../icons'
 import { Empty, Legend, PageHeader, Panel, Verdict, tooltipStyle } from '../ui'
 
@@ -92,10 +93,13 @@ export default function Lab({ onInjected }: { onInjected: (tab: string) => void 
   const runPreset = async (name: string) => {
     setBusy(name)
     try {
-      const r = await withProgress(`Setting up “${PRESETS.find((p) => p.key === name)?.label}”: rebuilding the station and re-planning. This can take up to a minute on a busy computer.`,
-        () => post<{ tab: string; description: string }>('/api/sim/preset', { name }))
+      armImpact()
+      const label = PRESETS.find((p) => p.key === name)?.label ?? name
+      const r = await withProgress(`Setting up “${label}”: rebuilding the station and re-planning. This can take up to a minute on a busy computer.`,
+        () => post<{ tab: string; description: string; event?: string; message?: string; before?: Overview | null }>('/api/sim/preset', { name }))
       setMsg(r.description)
       notify(r.description)
+      confirmImpact(r.event ?? 'reset', label, r.message ?? r.description, r.before ?? null, r.tab)
       onInjected(r.tab)
     } catch { /* post() already showed the reason */ } finally {
       setBusy(null)
@@ -105,10 +109,12 @@ export default function Lab({ onInjected }: { onInjected: (tab: string) => void 
   const inject = async (s: typeof SCENARIOS[number]) => {
     setBusy(s.key)
     try {
-      const r = await withProgress(`Injecting “${s.label}” and re-planning…`, () => post<{ message: string }>('/api/sim/inject', { type: s.key, params: s.params }))
+      armImpact()
+      const r = await withProgress(`Injecting “${s.label}” and re-planning…`, () => post<{ message: string; before?: Overview | null }>('/api/sim/inject', { type: s.key, params: s.params }))
       const where = s.key === 'resupply_delay' ? 'fuel' : s.key === 'blizzard' || s.key === 'wind_surplus' ? 'forecast' : 'overview'
       setMsg(r.message)
-      notify(`${r.message}. Opening the page that shows it.`)
+      notify(`${r.message}. The panel at the top shows what it changes.`)
+      confirmImpact(s.key, s.label, r.message, r.before, where)
       onInjected(where)
     } catch { /* post() already showed the reason */ } finally {
       setBusy(null)

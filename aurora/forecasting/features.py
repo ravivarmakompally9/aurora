@@ -36,6 +36,7 @@ def target_index(t0: np.ndarray, horizon: int, stride: int) -> np.ndarray:
 
 
 NWP_CYCLE_H = 6  # weather centres issue a new run every 6 h; forecasts in between reuse it
+NWP_ERROR_SCALE = 1.0  # stress-test multiplier on weather-forecast error (1 = normal)
 
 
 def nwp(twin, t0: np.ndarray, horizon: int, stride: int, seed: int = 0) -> dict[str, np.ndarray]:
@@ -64,6 +65,7 @@ def nwp(twin, t0: np.ndarray, horizon: int, stride: int, seed: int = 0) -> dict[
         cols = off[rows][:, None] + stride * np.arange(horizon)[None, :]
         e[:, rows, :] = ar[:, cols]
     wx = twin.wx
+    e = e * NWP_ERROR_SCALE
     temp = wx["temp_c"].to_numpy()[idx] + e[0] * sigma_temp(lead_h)
     wind10 = wx["wind10_ms"].to_numpy()[idx] * np.exp(e[1] * sigma_logwind(lead_h) - 0.5 * sigma_logwind(lead_h) ** 2)
     clear = wx["ghi_clear_wm2"].to_numpy()[idx]

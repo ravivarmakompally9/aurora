@@ -18,6 +18,7 @@ END_PROB = 0.3         # storm considered over below this
 PARK_MARGIN_MS = 1.5   # park turbines this far below cut-out
 RESERVE_MULT = 1.5
 READY_BEFORE_H = 3   # storage targets met this long before predicted onset
+HOLD_UNTIL_ARRIVAL_H = 2  # keep targets this far ahead while the storm is forecast but not yet measured
 
 
 @dataclass
@@ -30,6 +31,7 @@ class StormAssessment:
     peak_wind_ms: float
     park: np.ndarray              # bool per plan step: turbines parked
     message: str
+    arrived: bool = False         # blizzard winds measured now (not only forecast)
 
     def as_dict(self) -> dict:
         return {"active": self.active, "hours_to_onset": self.hours_to_onset, "prob_max": round(self.prob_max, 2),
@@ -66,7 +68,7 @@ def assess(st: Station, fc: dict, step_h: float, wind_now_ms: float, was_active:
         severity = ", strong enough to stop the wind turbines" if peak >= st.wind.cut_out_ms else ""
         msg = (f"Blizzard probability {pmax:.0%}: wind above {st.control.storm_wind_ms:.0f} m/s in {hrs:.0f} h"
                f"{severity}. Storm Mode activated.")
-    return StormAssessment(True, onset, end, hrs, pmax, peak, park, msg)
+    return StormAssessment(True, onset, end, hrs, pmax, peak, park, msg, arrived=now)
 
 
 def apply(st: Station, a: StormAssessment, soc_floor: np.ndarray, tank_floor: np.ndarray,
@@ -79,8 +81,11 @@ def apply(st: Station, a: StormAssessment, soc_floor: np.ndarray, tank_floor: np
     end = to_block(a.end_k)
     # reach the targets 3 h before predicted onset, so a storm arriving early still finds full storage
     ready = to_block(max(0, a.onset_k - READY_BEFORE_H * steps_per_h))
-    soc_floor[ready:on + 1] = np.maximum(soc_floor[ready:on + 1], st.control.storm_soc_target * b.capacity_kwh)
-    tank_floor[ready:on + 1] = np.maximum(tank_floor[ready:on + 1], st.control.storm_tank_target * tk.capacity_kwh)
+    # forecasts can put onset a few hours early: until blizzard winds are actually measured, keep the
+    # targets for at least the next HOLD_UNTIL_ARRIVAL_H, so storage is not spent before the storm arrives
+    hold = on if a.arrived else max(on, to_block(HOLD_UNTIL_ARRIVAL_H * steps_per_h))
+    soc_floor[ready:hold + 1] = np.maximum(soc_floor[ready:hold + 1], st.control.storm_soc_target * b.capacity_kwh)
+    tank_floor[ready:hold + 1] = np.maximum(tank_floor[ready:hold + 1], st.control.storm_tank_target * tk.capacity_kwh)
     pre = to_block(max(0, a.onset_k - steps_per_h))  # standby genset online an hour before onset
     min_units[pre:end + 1] = np.maximum(min_units[pre:end + 1], 1)
     reserve[on:end + 1] *= RESERVE_MULT

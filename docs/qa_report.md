@@ -69,3 +69,12 @@ Related fixes:
 - the standby-unit and minimum-on requirements are now capped inside the optimiser itself;
 - `Twin` accepts timezone-aware start times;
 - planned shedding is logged per tier.
+
+## Found while preparing the results analysis (docs/analysis.md)
+
+| Issue | Effect | Fix |
+|---|---|---|
+| Reserve counted the 120 kW water plant as a surprise load step | With no battery, AURORA kept two generators running and used 26% *more* fuel than diesel-first | Reserve now covers the largest unscheduled step (40 kW experiment). Reference saving 21.4% → 22.4% |
+| No dump load in the optimiser | With battery and power-to-heat off, plans could be impossible (36 failures in one month) | Dump load added at a small cost; 0 failures in all 13 analysis years |
+| Ship-delay demo preset could return before the new fuel result existed | Fuel screen briefly showed the old score | Fuel refresh waits for any run in progress; older results never overwrite newer ones |
+| Demo presets queued behind the live loop at high speed | Presets could take up to about 60 s | The loop pauses between steps while a preset runs; presets take 2–4 s |

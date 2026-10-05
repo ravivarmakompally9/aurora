@@ -84,6 +84,14 @@ This is how stations are typically run today (`twin/baseline.py`):
 
 AURORA and the baseline run on the same twin, weather, loads and events. Each simulated month starts both from the same state (battery 60%, tank 50%).
 
+## 5b. Safety reserve
+
+AURORA keeps enough spare power (running generators plus up to 30 minutes of battery) to cover forecast uncertainty and the largest load that can switch on unexpectedly: a 40 kW science experiment. Specifically:
+- **Forecast uncertainty:** P90 load minus P50, and P50 renewables minus P10.
+- **The water plant (120 kW) is not counted** because AURORA schedules it itself.
+- **Storm Mode raises the reserve by 50%.**
+- **Surplus output goes to a dump load:** when a generator at minimum load produces more than the station can use or store, the plan sends it to a dump load (resistor bank).
+
 ## 6. Fuel Survival Score
 
 - **Scenarios:** 1,000. Each future day takes a historical weather day: 5-day blocks, same season ±15 days, any of the three years.
@@ -105,7 +113,29 @@ When there is not enough energy for everything (for example every generator trip
 
 `tests/test_tier1_protection.py` checks this at both levels.
 
-## 8. What is not modelled
+## 8. Which values are illustrative
+
+| Item | Status | Notes |
+|---|---|---|
+| Weather (temperature, wind, sun) | **Real data** | NASA POWER reanalysis for the station coordinates. Smoother than on-site measurement: real gust peaks are higher |
+| Winter crew 24 | **Matches a public source** | Press coverage of Bharati's opening reports about 24 in winter and 47 in summer |
+| Summer crew 70 | **Illustrative, probably high** | The same source says about 47. A stress test runs the year with 47 (see docs/analysis.md) |
+| Generators 3 × 160 kW | **Illustrative** | Bharati is reported to have three CHP units; their rating was not found in public sources. Reported fuel is kerosene-type, modelled here with diesel properties (similar energy per litre) |
+| Fuel curve, minimum load, heat recovery | **Generic** | HOMER default Willans line; 45% heat recovery is typical for CHP with jacket and exhaust recovery |
+| PV 80 kWp, wind 2 × 30 kW, battery 500 kWh, thermal tank 900 kWh, power-to-heat 200 kW | **Hypothetical** | Not claimed to exist at Bharati. They show what AURORA does with such equipment; docs/analysis.md starts from generators only |
+| Building heat loss, per-person loads, water and laundry energy | **Illustrative** | Chosen to give plausible averages (93 kW electric, 140 kW heat) |
+| Fuel tank 400 kL, 120 kL on hand, 25 kL reserve, 150 L/day other use, resupply 5 Jan 2027 | **Illustrative** | Scenario inputs, editable in the dashboard |
+| Start costs (4 L fuel + 6 L wear), 2 h minimum run time | **Engineering assumption** | Typical values for cold diesel starts; not station data |
+
+**Is about 276,000 L a year plausible?** On a year of 2023 weather, the Bharati-like station burns about 276,000 L for power and heat under diesel-first rules (756 L/day), plus 150 L/day assumed for vehicles and other uses.
+
+- **What we can say:** this is the right order of magnitude for a station of this size.
+  - The modelled average loads are 93 kW electric and 140 kW heat.
+  - For comparison, Australia's Mawson station (about 20 people) saved 288,000 L of diesel in 2014 from two 300 kW wind turbines supplying about half its electricity, so its total use was several hundred thousand litres a year.
+- **What we cannot say:** no public figure for Bharati's or Maitri's annual fuel use was found, so the absolute number is **not validated**.
+- **What carries over:** percentage savings are more robust than absolute litres. NCPOR's meter and fuel records would replace the illustrative loads directly, via `configs/bharati.yaml` and the ingest layer.
+
+## 9. What is not modelled
 
 - Electrical transients below 15 minutes.
 - Battery degradation beyond a linear wear cost.

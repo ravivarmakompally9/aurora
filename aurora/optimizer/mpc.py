@@ -16,7 +16,7 @@ from aurora.guardrail.limits import Guardrail
 from aurora.optimizer.explain import Explainer
 from aurora.optimizer.milp import MAX_DAYS, SHED_TIERS, DispatchMILP, Plan, PlanInputs
 from aurora.storm_mode import storm
-from aurora.twin.baseline import DieselFirst
+from aurora.twin.baseline import DieselFirst, fixed_schedule
 from aurora.twin.simulator import Setpoint
 
 log = logging.getLogger(__name__)
@@ -26,8 +26,8 @@ YEAR_BLOCKS = [4] * 48              # hourly for the year-long comparison
 
 
 def largest_step_kw(st: Station) -> float:
-    el = st.loads["electric"]
-    return float(max(el["tier1_life_support"]["water_max_kw"], max(el["tier3_science"]["experiment_kw"])))
+    """Largest load that can switch on unexpectedly. The water plant is excluded: AURORA schedules it."""
+    return float(max(st.loads["electric"]["tier3_science"]["experiment_kw"]))
 
 
 class Grid:
@@ -48,7 +48,8 @@ class Grid:
         return int(min(np.searchsorted(self.ends, j, side="right"), len(self.blocks) - 1))
 
 
-def build_inputs(st: Station, twin, t: int, fc: dict, grid: Grid, sa: storm.StormAssessment) -> PlanInputs:
+def build_inputs(st: Station, twin, t: int, fc: dict, grid: Grid, sa: storm.StormAssessment,
+                 features: dict | None = None) -> PlanInputs:
     T = len(grid.blocks)
     step_h = grid.blocks * st.dt_h
     idx_fine = fc["idx"]
@@ -57,6 +58,10 @@ def build_inputs(st: Station, twin, t: int, fc: dict, grid: Grid, sa: storm.Stor
     park = grid.agg(sa.park.astype(float), "max") > 0
     turb = (~park).astype(float)
     load, load90 = grid.agg(fc["load_p50"]), grid.agg(fc["load_p90"])
+    flexible = (features or {}).get("flexible", True)
+    if not flexible:  # analysis: water and laundry follow today's fixed schedule instead of being optimised
+        fw, fl = fixed_schedule(twin, t, idx_fine)
+        load, load90 = load + grid.agg(fw + fl), load90 + grid.agg(fw + fl)
     pv, wind = grid.agg(fc["pv_p50"]), grid.agg(fc["wind_p50"]) * turb
     ren10 = grid.agg(fc["pv_p10"] + fc["wind_p10"]) * np.where(turb > 0, 1, 0) + grid.agg(fc["pv_p10"]) * (1 - turb)
     reserve = (load90 - load) + np.maximum(0, pv + wind - ren10) + np.maximum(
@@ -76,6 +81,8 @@ def build_inputs(st: Station, twin, t: int, fc: dict, grid: Grid, sa: storm.Stor
         if step_h[sel].sum() >= 24 - 1e-9:
             wreq[k], lreq[k] = wcap[k], lcap[k]
 
+    if not flexible:  # already part of the load above; the optimiser does not move it
+        wreq[:] = wcap[:] = lreq[:] = lcap[:] = 0.0
     soc_floor = np.full(T + 1, b.soc_min * b.capacity_kwh); soc_floor[0] = 0.0
     tank_floor = np.full(T + 1, tk.soc_min * tk.capacity_kwh); tank_floor[0] = 0.0
     min_units = np.zeros(T)
@@ -97,7 +104,7 @@ def build_inputs(st: Station, twin, t: int, fc: dict, grid: Grid, sa: storm.Stor
         day_of_step=d, water_req=wreq, water_cap=wcap, laundry_req=lreq, laundry_cap=lcap,
         soc0_kwh=twin.state.soc_kwh, tank0_kwh=twin.state.tank_kwh, gen_on0=twin.state.gen_on.astype(float),
         gen_avail=avail, soc_floor=soc_floor, tank_floor=tank_floor, min_units=min_units, min_on=min_on,
-        reserve=reserve, turbines_on=turb)
+        reserve=reserve, turbines_on=turb, features=features)
 
 
 class AuroraController:
@@ -105,8 +112,10 @@ class AuroraController:
 
     def __init__(self, st: Station, forecaster, blocks: list[int] | None = None, replan_every: int = 1,
                  time_limit_s: float = 30.0, explain: bool = True, seed: int = 0, mip_gap: float = 0.01,
-                 threads: int = 4):
+                 threads: int = 4, features: dict | None = None):
         self.st, self.f = st, forecaster
+        # analysis switches; normal operation has everything on
+        self.features = {"battery": True, "tank": True, "p2h": True, "flexible": True, **(features or {})}
         self.grid = Grid(blocks or LIVE_BLOCKS)
         self.replan_every = replan_every
         self.T = len(self.grid.blocks)
@@ -135,7 +144,7 @@ class AuroraController:
         out = self.f.forecast(twin, t, self.grid.H, 1, seed=self.seed)
         fc = {k: (v[0] if isinstance(v, np.ndarray) and v.ndim == 2 else v) for k, v in out.items()}
         sa = storm.assess(self.st, fc, self.st.dt_h, float(twin.wx["wind10_ms"].iloc[t]), was_active=self.mode == "storm")
-        x = build_inputs(self.st, twin, t, fc, self.grid, sa)
+        x = build_inputs(self.st, twin, t, fc, self.grid, sa, self.features)
         down = self.force_fail or t < self.fail_until
         plan = self.milp.solve(x) if not down else self.milp._failed("simulated optimiser crash", 0.0, x)
         self.solve_times.append(plan.solve_s)
@@ -176,8 +185,11 @@ class AuroraController:
                 batt_kw=float(p.ch[k] - p.dis[k]), p2h_kw=float(p.p2h[k]), boiler_kw=float(p.boiler[k]),
                 water_kw=float(p.water[k]), laundry_kw=float(p.laundry[k]),
                 shed_kw={c: float(p.shed[c][k]) for c in SHED_TIERS},
-                turbines_on=bool(p.inputs.turbines_on[k] > 0.5), use_tank=True,
+                turbines_on=bool(p.inputs.turbines_on[k] > 0.5), use_tank=self.features["tank"],
                 mode=self.mode, source="aurora")
+            if not self.features["flexible"]:
+                fw, fl = fixed_schedule(twin, t, np.array([t]))
+                sp.water_kw, sp.laundry_kw = float(fw[0]), float(fl[0])
         sp, violations = self.guard.validate(twin, t, sp)
         if self.explainer:
             self.explainer.on_step(twin, t, sp, violations)

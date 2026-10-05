@@ -116,3 +116,21 @@ def test_guardrail_enforces_minimum_run_time():
     sp = Setpoint(gen_on=[False, False, False], gen_kw=[0, 0, 0], batt_kw=0)
     out, _ = g.validate(tw, 0, sp)
     assert out.gen_on[0], "a unit inside its minimum run time must not be stopped"
+
+
+def test_analysis_switches_and_overrides(st_f):
+    """Capabilities switched off for the savings breakdown are really unused; overrides change only a copy."""
+    from aurora.sim import apply_overrides
+    st, f = st_f
+    st2 = apply_overrides(st, {"pv.kwp": 0.0, "loads.crew.summer": 47, "genset_min_up_h": 1.0})
+    assert st2.pv.kwp == 0 and st2.loads["crew"]["summer"] == 47 and st2.genset_min_up_h == 1.0
+    assert st.pv.kwp > 0 and st.loads["crew"]["summer"] != 47  # original untouched
+    tw = Twin(st, start="2023-07-10", end="2023-07-12")
+    c = AuroraController(st, f, blocks=YEAR_BLOCKS, replan_every=4,
+                         features={"battery": False, "tank": False, "p2h": False, "flexible": False})
+    log = tw.run(c, 0, 48)
+    p = c.plan
+    assert p.ch.max() < 1e-6 and p.dis.max() < 1e-6 and p.tank_ch.max() < 1e-6 and p.p2h.max() < 1e-6
+    assert p.water.max() < 1e-6  # flexible loads follow the fixed schedule, not the optimiser
+    assert (log.tank_ch_kw == 0).all() and (log.tank_dis_kw == 0).all()
+    assert log.unserved_tier1.sum() == 0

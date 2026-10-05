@@ -17,6 +17,26 @@ WATER_START_H = 9
 LAUNDRY_START_H = 10
 
 
+def fixed_schedule(twin: Twin, t: int, idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Water and laundry power at steps `idx` (from t onward) under the fixed daily schedule used today."""
+    left = twin.deferrable_left(t)
+    w_left, l_left = left["water"], left["laundry"]
+    wmax, lmax = twin.defer_max["water"], twin.defer_max["laundry"]
+    dt = twin.st.dt_h
+    water, laundry = np.zeros(len(idx)), np.zeros(len(idx))
+    day = twin.day_id[t]
+    for i, k in enumerate(idx):
+        if twin.day_id[k] != day:
+            day = twin.day_id[k]
+            w_left, l_left = twin.water_day[k], twin.laundry_day[k]
+        lh = twin.local_hour[k]
+        if lh >= WATER_START_H and w_left > 0:
+            water[i] = min(wmax, w_left / dt); w_left -= water[i] * dt
+        if lh >= LAUNDRY_START_H and l_left > 0:
+            laundry[i] = min(lmax, l_left / dt); l_left -= laundry[i] * dt
+    return water, laundry
+
+
 class DieselFirst:
     name = "diesel_first"
 

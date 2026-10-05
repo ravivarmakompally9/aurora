@@ -153,6 +153,18 @@ def inject(body: Inject):
         raise HTTPException(400, str(e))
 
 
+class Preset(BaseModel):
+    name: str              # reset | blizzard | ship_delay
+
+
+@app.post("/api/sim/preset")
+def preset(body: Preset):
+    try:
+        return S().preset(body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 class Control(BaseModel):
     action: str            # play | pause | speed | reset
     value: float | None = None

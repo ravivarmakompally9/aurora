@@ -37,12 +37,17 @@ class LiveSession:
         self.full = Twin(self.st)
         self.f = load_or_train(self.full)
         self.lock = threading.RLock()
+        self._views: dict = {}  # last result of each read view, served while a step holds the lock
         self.metrics = gen_metrics(len(self.st.gensets))
         self.use_modbus = use_modbus
         self.modbus_port = modbus_port
         self.server = self.reader = None
         self.fuel_result: dict | None = None
         self.fuel_busy = False
+        self.preset_busy = False
+        self._fuel_lock = threading.Lock()   # one Monte Carlo run at a time
+        self._fuel_gen = 0                   # request counter: newer requests supersede older ones
+        self._fuel_result_gen = 0
         self.reset()
 
     # ---------- lifecycle ----------
@@ -70,6 +75,7 @@ class LiveSession:
             self.last_plan_t = None
             self.telemetry_flags: dict = {}
             self.fuel_result = None
+            self._views.clear()  # a fresh station: never serve views of the old one
         self.refresh_fuel(blocking=False)
 
     # ---------- time ----------
@@ -138,8 +144,11 @@ class LiveSession:
 
     # ---------- events (FR-30) ----------
     def inject(self, kind: str, **kw) -> dict:
+        """Apply an event. Returns the event plus `before`: the station overview just before it, so the
+        dashboard can show exactly what the event changed."""
         with self.lock:
             t = self.t
+            before = self._overview() if self.twin.log else None
             msg = ""
             if kind == "blizzard":
                 lead_h = float(kw.get("lead_h", 16)); hours = float(kw.get("hours", 30))
@@ -189,37 +198,105 @@ class LiveSession:
                 raise ValueError(f"unknown event {kind}")
             self.ctrl.request_replan()  # re-plan at the next step with the new situation
             ev = {"time": str(self.display_time()), "type": kind, "message": msg}
+            self._views.clear()  # the next read shows the event at once
             self.events.append(ev)
             self.store.event(self.twin.index[t], kind, "info", msg)
         if kind in ("resupply_delay", "fuel_leak"):
             self.refresh_fuel(blocking=False)
-        return ev
+        return {**ev, "step": t, "before": before}
+
+    # ---------- demo presets ----------
+    PRESETS = {
+        "reset": "Clean station: 4 Oct, 06:00, no events",
+        "blizzard": "Blizzard rising in 16 h, running at 1 simulated hour per second",
+        "ship_delay": "Supply ship delayed by 30 days",
+    }
+
+    def preset(self, name: str) -> dict:
+        """One-click demo states for judges. Returns the screen to show next."""
+        if name not in self.PRESETS:
+            raise ValueError(f"unknown preset {name}")
+        self.preset_busy = True  # the live loop stops between steps instead of competing for the lock
+        try:
+            with self.lock:
+                return self._apply_preset(name)
+        finally:
+            self.preset_busy = False
+
+    def _apply_preset(self, name: str) -> dict:
+        self.reset()
+        self.step()  # first plan, so every screen has data at once
+        tab, ev = "overview", None
+        if name == "blizzard":
+            ev = self.inject("blizzard", lead_h=16, hours=30, peak_ms=32)
+            self.step()
+            self.speed, self.running, tab = 4, True, "forecast"
+        elif name == "ship_delay":
+            self.refresh_fuel(blocking=True)  # score before the delay, for the before/after comparison
+            ev = self.inject("resupply_delay", days=30)
+            self.refresh_fuel(blocking=True)
+            tab = "fuel"
+        out = {"preset": name, "description": self.PRESETS[name], "tab": tab}
+        if ev:
+            out.update(event=ev["type"], message=ev["message"], step=ev["step"], before=ev["before"])
+        return out
 
     # ---------- fuel planner ----------
     def refresh_fuel(self, blocking: bool = True):
-        if self.fuel_busy:
-            return
+        """Re-score fuel with the current inputs. blocking=True waits for any run in progress and returns
+        only when a result for the current inputs exists; background requests that a newer one superseded
+        are skipped, and an older result never overwrites a newer one."""
+        self._fuel_gen += 1
+        gen = self._fuel_gen
+
         def work():
-            self.fuel_busy = True
-            try:
-                with self.lock:
+            with self._fuel_lock:
+                if gen < self._fuel_result_gen or (not blocking and gen != self._fuel_gen):
+                    return  # a newer request already produced (or will produce) the result
+                self.fuel_busy = True
+                try:
+                    # plain reads, deliberately without the station lock: a preset holds that lock while it
+                    # waits here, and taking it inside the fuel lock would deadlock
                     fuel_l = self.twin.state.fuel_l
                     today = self.today()
                     resupply = self.fuel["resupply"]
                     delay = self.fuel["delay_days"]
-                r = montecarlo.plan(self.key, today, fuel_l, resupply, delay, n=1000)
-                self.fuel_result = r
-            except Exception:
-                log.exception("fuel planner failed")
-            finally:
-                self.fuel_busy = False
+                    r = montecarlo.plan(self.key, today, fuel_l, resupply, delay, n=1000)
+                    if gen >= self._fuel_result_gen:
+                        self.fuel_result, self._fuel_result_gen = r, gen
+                except Exception:
+                    log.exception("fuel planner failed")
+                finally:
+                    self.fuel_busy = False
         if blocking:
             work()
         else:
             threading.Thread(target=work, daemon=True).start()
 
     # ---------- views ----------
+    def _read(self, key: str, build) -> dict:
+        """Serve a dashboard view without queueing behind a slow optimiser step: build it when the
+        lock frees up within 50 ms, otherwise return the last result (a step later at most)."""
+        cached = self._views.get(key)  # one read: reset() may clear the cache at any moment
+        if cached is None:
+            out = build()  # first request (or just after a reset): wait for it
+        elif self.lock.acquire(timeout=0.05):
+            try:
+                out = build()  # the lock is re-entrant, so build() can take it again
+            finally:
+                self.lock.release()
+        else:
+            out = cached
+            # cheap fields the user just changed must never look stale
+            return {**out, "running": self.running, "speed": self.speed} if key == "overview" and out.get("ready") else out
+        if out.get("ready", True):  # never keep a "starting up" view to serve later
+            self._views[key] = out
+        return out
+
     def overview(self) -> dict:
+        return self._read("overview", self._overview)
+
+    def _overview(self) -> dict:
         with self.lock:
             st, tw = self.st, self.twin
             if not tw.log:
@@ -286,9 +363,13 @@ class LiveSession:
         return {"key": st.key, "name": st.name, "location": st.location, "lat": st.lat, "lon": st.lon,
                 "gensets": [{"id": g.id, "rated_kw": g.rated_kw} for g in st.gensets],
                 "pv_kwp": st.pv.kwp, "wind_kw": st.wind.total_kw, "battery_kwh": st.battery.capacity_kwh,
-                "tank_kwh": st.tank.capacity_kwh}
+                "tank_kwh": st.tank.capacity_kwh,
+                "storm_targets": {"soc": st.control.storm_soc_target, "tank": st.control.storm_tank_target}}
 
     def forecast_view(self) -> dict:
+        return self._read("forecast_view", self._forecast_view)
+
+    def _forecast_view(self) -> dict:
         with self.lock:
             fc, p, tw = self.ctrl.fc, self.ctrl.plan, self.twin
             if fc is None:
@@ -328,6 +409,9 @@ class LiveSession:
             return out
 
     def decisions(self) -> dict:
+        return self._read("decisions", self._decisions)
+
+    def _decisions(self) -> dict:
         with self.lock:
             ex = self.ctrl.explainer
             cards = []
@@ -353,11 +437,18 @@ async def run_loop(session: LiveSession, broadcast, tick_s: float = 1.0):
     last_fuel_t = session.t
     while True:
         started = asyncio.get_running_loop().time()
-        if session.running:
-            for _ in range(session.speed):
-                await asyncio.to_thread(session.step)
-            if session.t - last_fuel_t >= 24:  # refresh Fuel Survival Score every 6 simulated hours
-                session.refresh_fuel(blocking=False)
+        try:  # the loop must never die: log the error and keep the station running
+            if session.t < last_fuel_t:  # the station was reset
                 last_fuel_t = session.t
-        await broadcast(session.overview())  # also while paused, so injected events and settings show at once
+            if session.running:
+                for _ in range(session.speed):
+                    if not session.running or session.preset_busy:
+                        break  # let a pause or a demo preset take over at once
+                    await asyncio.to_thread(session.step)
+                if session.t - last_fuel_t >= 24:  # refresh Fuel Survival Score every 6 simulated hours
+                    session.refresh_fuel(blocking=False)
+                    last_fuel_t = session.t
+            await broadcast(session.overview())  # also while paused, so injected events and settings show at once
+        except Exception:
+            log.exception("live loop error at step %s", session.t)
         await asyncio.sleep(max(0.05, tick_s - (asyncio.get_running_loop().time() - started)))

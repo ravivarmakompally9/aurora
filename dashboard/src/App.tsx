@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { notify, post, useLive, type Toast } from './api'
 import { LIVE_APP_URL, STATIC } from './demo'
 import { Icon, Logo } from './icons'
+import { EventImpact, type Impact } from './impact'
 import Decisions from './screens/Decisions'
 import Forecast from './screens/Forecast'
 import Fuel from './screens/Fuel'
@@ -126,6 +127,23 @@ export default function App() {
     return () => { window.removeEventListener('aurora-toast', on); window.removeEventListener('aurora-toast-dismiss', off) }
   }, [])
 
+  // Event impact: what an injected event or demo changed (shown above every page until closed)
+  const [impact, setImpact] = useState<Impact | null>(null)
+  const latest = useRef(data)
+  useEffect(() => { latest.current = data }, [data]) // keep the newest snapshot for the impact panel's "before" state
+  const armed = useRef<typeof data>(null)
+  useEffect(() => {
+    const arm = () => { armed.current = latest.current }
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<Omit<Impact, 'at'>>).detail
+      if (d.kind === 'reset') { setImpact(null); return }
+      setImpact({ ...d, before: d.before ?? armed.current ?? null, at: Date.now() })
+    }
+    window.addEventListener('aurora-impact-arm', arm)
+    window.addEventListener('aurora-impact', on)
+    return () => { window.removeEventListener('aurora-impact-arm', arm); window.removeEventListener('aurora-impact', on) }
+  }, [])
+
   const step = data?.step ?? 0
   const hour = Math.floor(step / 4) // detail screens refresh once per simulated hour (or on their timer)
   const when = data?.ready ? new Date(data.time.replace(' ', 'T')) : null
@@ -195,12 +213,13 @@ export default function App() {
           <div className="card px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2" style={{ background: 'var(--accent-soft)', borderColor: 'color-mix(in srgb, var(--accent) 30%, white)' }}>
             <span style={{ color: 'var(--accent)' }}><Icon name="play" size={18} /></span>
             <span className="text-sm flex-1 min-w-[240px]"><b>Recorded demo.</b> You are watching real runs of the AURORA digital twin, replayed in your browser. All figures are simulated.</span>
-            <a className="btn btn-accent !min-h-[40px] !text-sm" href={LIVE_APP_URL} target="_blank" rel="noreferrer">Run it live in Codespaces<Icon name="arrow" size={16} /></a>
+            <a className="btn btn-accent !min-h-[40px] !text-sm" href={LIVE_APP_URL} target="_blank" rel="noreferrer">Run it live<Icon name="arrow" size={16} /></a>
           </div>
         )}
         <main className="grid gap-5 min-w-0">
           {!data?.ready ? <div className="card"><Empty>Starting the station twin and forecasters…</Empty></div> : (
             <>
+              {impact && <EventImpact impact={impact} now={data} onClose={() => setImpact(null)} go={setTab} />}
               {tab === 'overview' && <Overview d={data} go={setTab} tour={tour} openHelp={() => setHelp(true)} />}
               {tab === 'forecast' && <Forecast step={hour} targets={data.station.storm_targets} stormActive={data.mode === 'storm'} go={setTab} />}
               {tab === 'decisions' && <Decisions step={hour} go={setTab} />}

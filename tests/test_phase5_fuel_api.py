@@ -184,3 +184,56 @@ def test_live_trip_and_optimizer_crash_show_cards(client):
     assert client.get("/api/state").json()["mode"] in ("normal", "storm")
     titles = [c["title"] for c in client.get("/api/decisions").json()["cards"]]
     assert "Fallback to diesel-first" in titles and "AURORA control restored" in titles
+
+
+def test_demo_presets(client):
+    r = client.post("/api/sim/preset", json={"name": "ship_delay"}).json()
+    assert r["tab"] == "fuel"
+    st = client.get("/api/state").json()
+    assert st["fuel"]["delay_days"] == 30 and st["step"] >= 1
+    r = client.post("/api/sim/preset", json={"name": "blizzard"}).json()
+    assert r["tab"] == "forecast"
+    st = client.get("/api/state").json()
+    assert st["mode"] == "storm" and st["fuel"]["delay_days"] == 0  # preset starts from a clean station
+    r = client.post("/api/sim/preset", json={"name": "reset"}).json()
+    st = client.get("/api/state").json()
+    assert st["mode"] == "normal" and st["events"] == [] and st["time"].startswith("2026-10-04")
+    assert client.post("/api/sim/preset", json={"name": "nope"}).status_code == 400
+
+
+def test_ship_delay_preset_waits_for_fresh_fuel_result(client):
+    """The preset must return only after the fuel score reflects the delay (no race with the reset's refresh)."""
+    from aurora.api.main import STATE
+    s = STATE["session"]
+    for _ in range(3):
+        client.post("/api/sim/preset", json={"name": "ship_delay"})
+        fr = s.fuel_result
+        assert fr is not None and fr["aurora"]["planned_arrival"] >= "2027-02-04"
+        assert client.get("/api/state").json()["fuel"]["survival_score"] < 0.5
+
+
+def test_live_loop_keeps_running_after_presets(client):
+    """Regression: a preset used to kill the live loop (cache cleared between check and read)."""
+    import time
+    from aurora.api.main import STATE
+    s = STATE["session"]
+    for name in ("blizzard", "reset", "ship_delay", "blizzard"):
+        client.post("/api/sim/preset", json={"name": name})
+    client.post("/api/sim/control", json={"action": "play"})
+    t0 = s.t
+    deadline = time.time() + 20
+    while s.t == t0 and time.time() < deadline:
+        time.sleep(0.2)
+    assert s.t > t0, "the live loop must keep stepping after presets"
+    client.post("/api/sim/control", json={"action": "pause"})
+
+
+def test_events_return_before_snapshot(client):
+    """The dashboard's Event impact panel compares this snapshot with the live state."""
+    client.post("/api/sim/control", json={"action": "pause"})
+    r = client.post("/api/sim/inject", json={"type": "fuel_leak", "params": {"litres": 2000, "hours": 4}}).json()
+    assert r["before"]["ready"] and r["before"]["fuel"]["level_l"] > 0 and "step" in r
+    p = client.post("/api/sim/preset", json={"name": "ship_delay"}).json()
+    assert p["event"] == "resupply_delay" and p["before"]["fuel"]["delay_days"] == 0
+    assert p["before"]["fuel"]["survival_score"] is not None  # baseline score exists for the comparison
+    assert "before" not in client.post("/api/sim/preset", json={"name": "reset"}).json()
