@@ -8,7 +8,8 @@ export type Card = {
 export type Overview = {
   ready: boolean
   station: { key: string; name: string; location: string; lat: number; lon: number
-    gensets: { id: string; rated_kw: number }[]; pv_kwp: number; wind_kw: number; battery_kwh: number; tank_kwh: number }
+    gensets: { id: string; rated_kw: number }[]; pv_kwp: number; wind_kw: number; battery_kwh: number; tank_kwh: number
+    storm_targets?: { soc: number; tank: number } }
   time: string; step: number; running: boolean; speed: number; mode: 'normal' | 'storm' | 'fallback'
   sources: { pv_kw: number; wind_kw: number; pv_avail_kw: number; wind_avail_kw: number; curtail_kw: number
     gen_kw: number; batt_kw: number; turbines_on: boolean }
@@ -34,10 +35,44 @@ export async function get<T>(path: string): Promise<T> {
   return r.json()
 }
 
-export async function post<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
-  return r.json()
+export type Toast = { id: number; text: string; status: 'ok' | 'info' | 'critical' | 'busy'; sticky?: boolean }
+let toastSeq = 0
+/** Show a message in the corner (the App renders them). Sticky messages stay until dismissed. */
+export function notify(text: string, status: Toast['status'] = 'ok', sticky = false): number {
+  const id = ++toastSeq
+  window.dispatchEvent(new CustomEvent<Toast>('aurora-toast', { detail: { id, text, status, sticky } }))
+  return id
+}
+export function dismiss(id: number) {
+  window.dispatchEvent(new CustomEvent<number>('aurora-toast-dismiss', { detail: id }))
+}
+/** Run a slow server action with a visible "working…" message until it finishes. */
+export async function withProgress<T>(text: string, fn: () => Promise<T>): Promise<T> {
+  const id = notify(text, 'busy', true)
+  try { return await fn() } finally { dismiss(id) }
+}
+
+/** POST with a timeout and a readable error, so a click never fails silently. */
+export async function post<T>(path: string, body: unknown, timeoutMs = 180000): Promise<T> {
+  const ctl = new AbortController()
+  const timer = window.setTimeout(() => ctl.abort(), timeoutMs)
+  try {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: ctl.signal })
+    if (!r.ok) {
+      const detail = await r.text().then((t) => { try { return JSON.parse(t).detail ?? t } catch { return t } })
+      throw new Error(r.status === 404 || r.status === 405
+        ? 'The server is running an older version of AURORA. Restart it (uv run aurora serve) and reload this page.'
+        : `Server error ${r.status}: ${detail}`)
+    }
+    return r.json()
+  } catch (e) {
+    const msg = (e as Error).name === 'AbortError' ? 'The station server took too long to answer. It may be busy; try again in a moment.'
+      : (e as Error).message.startsWith('Failed to fetch') ? 'Cannot reach the AURORA server. Is it running?' : (e as Error).message
+    notify(msg, 'critical')
+    throw new Error(msg)
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Live station overview over WebSocket, with polling as a fallback. */
@@ -45,6 +80,8 @@ export function useLive(): { data: Overview | null; connected: boolean } {
   const [data, setData] = useState<Overview | null>(null)
   const [connected, setConnected] = useState(false)
   const retry = useRef<number | undefined>(undefined)
+  // after a reset (e.g. a demo preset) the server is briefly "not ready": keep showing the last good state
+  const keep = (d: Overview) => setData((prev) => (d.ready || !prev?.ready ? d : prev))
   useEffect(() => {
     let ws: WebSocket | null = null
     let stopped = false
@@ -53,27 +90,30 @@ export function useLive(): { data: Overview | null; connected: boolean } {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}/ws/live`)
       ws.onopen = () => { setConnected(true); if (poll) { clearInterval(poll); poll = undefined } }
-      ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'overview') setData(m.data) }
+      ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === 'overview') keep(m.data) }
       ws.onclose = () => {
         setConnected(false)
-        if (!poll) poll = window.setInterval(() => get<Overview>('/api/state').then(setData).catch(() => {}), 2000)
+        if (!poll) poll = window.setInterval(() => get<Overview>('/api/state').then(keep).catch(() => {}), 2000)
         if (!stopped) retry.current = window.setTimeout(connect, 3000)
       }
     }
     connect()
+    get<Overview>('/api/state').then((d) => { if (!stopped) setData((cur) => cur ?? d) }).catch(() => {}) // first paint without waiting for the socket
     return () => { stopped = true; ws?.close(); clearTimeout(retry.current); if (poll) clearInterval(poll) }
   }, [])
   return { data, connected }
 }
 
+const lastData = new Map<string, unknown>() // last answer per endpoint: revisiting a page shows it at once
+
 /** Poll an endpoint every `ms` (refetches when `key` changes). */
 export function usePoll<T>(path: string, ms: number, key?: unknown): { data: T | null; error: string | null; reload: () => void } {
-  const [data, setData] = useState<T | null>(null)
+  const [data, setData] = useState<T | null>(() => (lastData.get(path) as T) ?? null)
   const [error, setError] = useState<string | null>(null)
   const [n, setN] = useState(0)
   useEffect(() => {
     let alive = true
-    const load = () => get<T>(path).then((d) => { if (alive) { setData(d); setError(null) } }).catch((e) => alive && setError(String(e)))
+    const load = () => get<T>(path).then((d) => { lastData.set(path, d); if (alive) { setData(d); setError(null) } }).catch((e) => alive && setError(String(e)))
     load()
     const id = window.setInterval(load, ms)
     return () => { alive = false; clearInterval(id) }
