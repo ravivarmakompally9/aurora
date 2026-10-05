@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { fmt, notify, post, usePoll, withProgress } from '../api'
+import { LIVE_APP_URL, STATIC } from '../demo'
 import { Icon, IconBadge } from '../icons'
 import { Callout, Empty, FutureDots, Legend, PageHeader, Panel, StatusChip, Verdict, tooltipStyle } from '../ui'
 
@@ -144,7 +145,8 @@ export default function Fuel({ go, refreshKey }: { go: (t: string) => void; refr
                 <input id="resupply" type="date" value={resupply} onChange={(e) => setResupply(e.target.value)} /></label>
               <label className="grid gap-1.5"><span className="label">Known delay (days)</span>
                 <input id="delay" type="number" min={0} max={120} value={delay} onChange={(e) => setDelay(e.target.value === '' ? '' : Number(e.target.value))} /></label>
-              <button className="btn btn-primary" disabled={busy} onClick={apply}><Icon name="reset" size={18} />{busy ? 'Scoring…' : 'Re-score fuel'}</button>
+              {STATIC && <p className="text-xs m-0" style={{ color: 'var(--muted)' }}>Re-scoring runs 1,000 new simulations, so it works in the <a href={LIVE_APP_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>live app</a>, not in this recorded demo.</p>}
+              <button className="btn btn-primary" disabled={busy || STATIC} onClick={apply}><Icon name="reset" size={18} />{busy ? 'Scoring…' : 'Re-score fuel'}</button>
             </div>
           </Panel>
           <Panel>

@@ -1,0 +1,20 @@
+{
+ "generated": "2026-10-05T11:49:29+00:00",
+ "station": "bharati",
+ "simulated": true,
+ "scenarios": {
+  "normal": {
+   "title": "A normal spring day at the station",
+   "frames": 96
+  },
+  "blizzard": {
+   "title": "Blizzard rising in 16 h: Storm Mode prepares the station",
+   "frames": 113
+  },
+  "ship_delay": {
+   "title": "Supply ship delayed by 30 days",
+   "frames": 25
+  }
+ },
+ "year": true
+}

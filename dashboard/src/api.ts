@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { demo, LiveOnly, LIVE_APP_URL, STATIC } from './demo'
 
 export type Card = {
   time: string; local: string; step: number; level: 'info' | 'advisory' | 'warning' | 'critical'
@@ -30,6 +31,7 @@ export type Overview = {
 }
 
 export async function get<T>(path: string): Promise<T> {
+  if (STATIC) return demo.get(path) as Promise<T>
   const r = await fetch(path)
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`)
   return r.json()
@@ -54,6 +56,13 @@ export async function withProgress<T>(text: string, fn: () => Promise<T>): Promi
 
 /** POST with a timeout and a readable error, so a click never fails silently. */
 export async function post<T>(path: string, body: unknown, timeoutMs = 180000): Promise<T> {
+  if (STATIC) {
+    try { return await demo.post(path, body as Record<string, unknown>) as T } catch (e) {
+      const msg = e instanceof LiveOnly ? `${e.message} This page is a recorded demo; run the live app in GitHub Codespaces: ${LIVE_APP_URL}` : (e as Error).message
+      notify(msg, e instanceof LiveOnly ? 'info' : 'critical')
+      throw new Error(msg)
+    }
+  }
   const ctl = new AbortController()
   const timer = window.setTimeout(() => ctl.abort(), timeoutMs)
   try {
@@ -83,6 +92,11 @@ export function useLive(): { data: Overview | null; connected: boolean } {
   // after a reset (e.g. a demo preset) the server is briefly "not ready": keep showing the last good state
   const keep = (d: Overview) => setData((prev) => (d.ready || !prev?.ready ? d : prev))
   useEffect(() => {
+    if (STATIC) { // recorded demo: frames come from the in-browser player
+      const off = demo.subscribe(() => { const f = demo.frame(); if (f) { setData(f); setConnected(true) } })
+      demo.start().catch((e) => notify(String(e.message ?? e), 'critical'))
+      return off
+    }
     let ws: WebSocket | null = null
     let stopped = false
     let poll: number | undefined

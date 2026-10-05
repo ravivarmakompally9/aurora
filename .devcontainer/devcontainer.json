@@ -1,0 +1,19 @@
+{
+  // Full live AURORA in GitHub Codespaces: Python 3.11 (uv) + Node 22, dashboard served on port 8765.
+  "name": "AURORA live app",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" }
+  },
+  "hostRequirements": { "cpus": 4, "memory": "8gb" },
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postAttachCommand": "bash .devcontainer/start.sh",
+  "forwardPorts": [8765],
+  "portsAttributes": {
+    "8765": { "label": "AURORA dashboard", "onAutoForward": "openBrowser" }
+  },
+  "customizations": {
+    "codespaces": { "openFiles": ["README.md"] },
+    "vscode": { "extensions": ["ms-python.python"] }
+  }
+}

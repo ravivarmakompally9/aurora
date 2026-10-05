@@ -2,7 +2,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-data/processed/
+data/processed/*
+# the full-year daily summary is small and the fuel planner needs it (fresh clones, Codespaces)
+!data/processed/year_bharati_2023_daily.csv
 data/synthetic/
 *.db
 *.db-journal
