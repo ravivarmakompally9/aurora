@@ -9,3 +9,6 @@ data/synthetic/
 dashboard/node_modules/
 dashboard/dist/
 .DS_Store
+
+# local Claude Code settings (machine-specific paths)
+.claude/
