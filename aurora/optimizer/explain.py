@@ -87,7 +87,15 @@ class Explainer:
         for v in violations:
             if v["rule"] != "turbine_cut_out" or not self.cards or self.cards[-1]["title"] != "Turbines parked":
                 self.card(twin, t, v["severity"], _rule_title(v["rule"]), v["detail"], kind="guardrail")
-        stopped = [g for g in range(len(gens)) if prev[g] and not now[g]]
+        avail = twin.gen_available(t)
+        for g in range(len(gens)):
+            if prev[g] and not avail[g]:
+                backup = [gens[i].id for i in np.flatnonzero(now)]
+                self.card(twin, t, "warning", f"{gens[g].id} tripped",
+                          f"{gens[g].id} went offline. The battery covered the gap instantly"
+                          + (f"; {', '.join(backup)} now carries the load." if backup else "; solar, wind and battery carry the load."),
+                          kind="guardrail")
+        stopped = [g for g in range(len(gens)) if prev[g] and not now[g] and avail[g]]
         started = [g for g in range(len(gens)) if now[g] and not prev[g]]
         ren = twin.pv_avail[t] + (twin.wind_avail[t] if sp.turbines_on else 0)
         soc = twin.state.soc_kwh / max(st.battery.capacity_kwh, 1)

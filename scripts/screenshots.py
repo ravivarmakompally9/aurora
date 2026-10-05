@@ -20,7 +20,7 @@ OUT = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
 TABS = ["overview", "forecast", "decisions", "fuel", "lab"]
 
 
-async def shoot(url: str, theme: str, width: int, height: int, wait_s: float):
+async def shoot(url: str, theme: str, width: int, height: int, wait_s: float, tag: str = ""):
     port = 9333
     profile = tempfile.mkdtemp(prefix="aurora-shot-")
     proc = subprocess.Popen([CHROME, "--headless=new", f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
@@ -58,7 +58,7 @@ async def shoot(url: str, theme: str, width: int, height: int, wait_s: float):
                 await cmd("Emulation.setDeviceMetricsOverride", width=width, height=int(h), deviceScaleFactor=2, mobile=False)
                 await asyncio.sleep(1.0)
                 shot = await cmd("Page.captureScreenshot", format="png", captureBeyondViewport=True)
-                path = OUT / f"{tab}_{theme}.png"
+                path = OUT / f"{tab}_{theme}{tag}.png"
                 path.write_bytes(base64.b64decode(shot["data"]))
                 print(path)
                 await cmd("Emulation.setDeviceMetricsOverride", width=width, height=height, deviceScaleFactor=2, mobile=False)
@@ -73,5 +73,6 @@ if __name__ == "__main__":
     a.add_argument("--width", type=int, default=1440)
     a.add_argument("--height", type=int, default=900)
     a.add_argument("--wait", type=float, default=5.0)
+    a.add_argument("--tag", default="", help="suffix for file names, e.g. _tablet")
     args = a.parse_args()
-    asyncio.run(shoot(args.url, args.theme, args.width, args.height, args.wait))
+    asyncio.run(shoot(args.url, args.theme, args.width, args.height, args.wait, args.tag))

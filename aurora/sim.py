@@ -50,7 +50,13 @@ def _run_month(args):
 
 
 def daily(st, lb: pd.DataFrame, la: pd.DataFrame) -> pd.DataFrame:
-    local = lambda d: (d.index + pd.Timedelta(hours=st.utc_offset_h)).normalize().tz_localize(None)
+    year = int(la.index[len(la) // 2].year)
+    # station-local days; the few hours past 31 Dec (UTC offset) stay in 31 Dec so totals match the KPIs
+    cap = pd.Timestamp(f"{year}-12-31")
+
+    def local(d):
+        days = (d.index + pd.Timedelta(hours=st.utc_offset_h)).normalize().tz_localize(None)
+        return days.where(days <= cap, cap)
     dt = st.dt_h
     out = pd.DataFrame({
         "base_fuel_l": lb.fuel_l.groupby(local(lb)).sum(),
@@ -62,9 +68,9 @@ def daily(st, lb: pd.DataFrame, la: pd.DataFrame) -> pd.DataFrame:
         "aurora_gen_h": (la.gens_on * dt).groupby(local(la)).sum(),
         "storm_h": ((la["mode"] == "storm") * dt).groupby(local(la)).sum(),
     })
+    out["hours"] = la.fuel_l.groupby(local(la)).size() * dt
     out.index.name = "date"
-    steps = la.fuel_l.groupby(local(la)).size()
-    return out[steps.reindex(out.index).to_numpy() == st.steps_per_day]  # drop partial days at the UTC edges
+    return out
 
 
 def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, replan_h: float = 3.0) -> dict:
@@ -87,15 +93,14 @@ def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, r
                    "max_s": round(max(p["solve_max_s"] for p in parts), 2)},
         "diesel_first": kb, "aurora": ka, "comparison": compare(st, kb, ka),
     }
-    d = daily(st, lb, la)
-    cards = [c for p in parts for c in p["cards"]]
-    out_json = ROOT / "docs" / f"year_{key}_{year}.json"
-    out_json.write_text(json.dumps(result, indent=2, default=float))
     proc = DATA_DIR / "processed"
     proc.mkdir(parents=True, exist_ok=True)
-    d.to_csv(proc / f"year_{key}_{year}_daily.csv")
-    with open(proc / f"year_{key}_{year}_logs.pkl", "wb") as fh:
+    cards = [c for p in parts for c in p["cards"]]
+    with open(proc / f"year_{key}_{year}_logs.pkl", "wb") as fh:  # save the expensive part first
         pickle.dump({"base": lb, "aurora": la, "cards": cards}, fh)
+    out_json = ROOT / "docs" / f"year_{key}_{year}.json"
+    out_json.write_text(json.dumps(result, indent=2, default=float))
+    daily(st, lb, la).to_csv(proc / f"year_{key}_{year}_daily.csv")
     return result
 
 

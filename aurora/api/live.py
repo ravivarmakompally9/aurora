@@ -110,7 +110,8 @@ class LiveSession:
         self.prev_values = clean
         for m, fl in flags.items():
             if fl != "ok" and prev_flags.get(m, "ok") != fl:
-                self.events.append({"time": str(self.display_time()), "type": "sensor", "metric": m, "flag": fl})
+                self.events.append({"time": str(self.display_time()), "type": "sensor", "metric": m, "flag": fl,
+                                    "message": f"Sensor {m} {fl}: value imputed"})
                 self.store.event(self.twin.index[t], "sensor", "warning", f"{m} {fl}: value imputed")
 
     def _estimates(self, t: int) -> dict:
@@ -145,14 +146,22 @@ class LiveSession:
                 at = t + int(lead_h / self.st.dt_h)
                 for tw in (self.twin, self.shadow):
                     tw.inject("blizzard", t=at, hours=hours, peak_ms=float(kw.get("peak_ms", 32)))
-                msg = f"Blizzard injected: onset in {lead_h:.0f} h, {hours:.0f} h long"
+                msg = (f"Blizzard injected: winds start rising in {lead_h:.0f} h, peak {float(kw.get('peak_ms', 32)):.0f} m/s, "
+                       f"{hours:.0f} h long")
             elif kind == "generator_failure":
-                on = np.flatnonzero(self.twin.state.gen_on)
-                g = int(kw.get("gen", on[0] if len(on) else 0))
+                on = np.flatnonzero(self.twin.state.gen_on & self.twin.gen_available(t))
+                avail = np.flatnonzero(self.twin.gen_available(t))
+                if "gen" in kw:
+                    g = int(kw["gen"])
+                elif len(on):
+                    g = int(on[0])
+                else:
+                    g = int(avail[0]) if len(avail) else 0
                 hours = float(kw.get("hours", 24))
                 for tw in (self.twin, self.shadow):
                     tw.inject("generator_failure", t=t, hours=hours, gen=g)
-                msg = f"{self.st.gensets[g].id} tripped for {hours:.0f} h"
+                was = "while running" if g in on else "while on standby; one fewer unit is available"
+                msg = f"{self.st.gensets[g].id} tripped {was} (out for {hours:.0f} h)"
             elif kind == "sensor_loss":
                 metric = kw.get("metric", "MET.wind_ms"); mode = kw.get("mode", "frozen")
                 self.faults.add(metric, mode, t + int(float(kw.get("hours", 6)) / self.st.dt_h))
@@ -172,24 +181,19 @@ class LiveSession:
                     tw.inject("wind_surplus", t=t, hours=hours, speed_ms=float(kw.get("speed_ms", 14)))
                 msg = f"Strong steady wind for {hours:.0f} h"
             elif kind == "optimizer_failure":
-                self.ctrl.force_fail = True
-                self.ctrl.plan = None
-                threading.Timer(kw.get("seconds", 8), self._restore_optimizer).start()
-                msg = "Optimiser failure simulated"
+                hours = float(kw.get("hours", 2))
+                self.ctrl.fail_until = t + int(hours / self.st.dt_h)
+                self.ctrl.plan = None  # the last plan is lost too (worst case)
+                msg = f"Optimiser crash simulated for {hours:.0f} h"
             else:
                 raise ValueError(f"unknown event {kind}")
-            self.ctrl.plan_t = -10 ** 9  # re-plan immediately with the new situation
+            self.ctrl.request_replan()  # re-plan at the next step with the new situation
             ev = {"time": str(self.display_time()), "type": kind, "message": msg}
             self.events.append(ev)
             self.store.event(self.twin.index[t], kind, "info", msg)
         if kind in ("resupply_delay", "fuel_leak"):
             self.refresh_fuel(blocking=False)
         return ev
-
-    def _restore_optimizer(self):
-        with self.lock:
-            self.ctrl.force_fail = False
-            self.ctrl.plan_t = -10 ** 9
 
     # ---------- fuel planner ----------
     def refresh_fuel(self, blocking: bool = True):
@@ -261,9 +265,21 @@ class LiveSession:
                 "storm": sa.as_dict() if sa else None,
                 "plan_summary": self.ctrl.explainer.summary if self.ctrl.explainer else {},
                 "sensors": {m: f for m, f in self.telemetry_flags.items() if f != "ok"},
-                "alerts": [c for c in self.ctrl.explainer.cards[-30:] if c["level"] in ("warning", "critical")][-3:][::-1],
+                "alerts": self._recent_alerts(),
                 "events": self.events[-6:][::-1],
             }
+
+    def _recent_alerts(self, hours: float = 12) -> list[dict]:
+        """Warnings and critical cards from the last `hours`, newest first, one per title."""
+        since = self.t - int(hours / self.st.dt_h)
+        out, seen = [], set()
+        for c in reversed(self.ctrl.explainer.cards):
+            if c["step"] < since:
+                break
+            if c["level"] in ("warning", "critical") and c["title"] not in seen:
+                seen.add(c["title"])
+                out.append({**c, "local": self.display_time(c["step"]).strftime("%a %d %b %H:%M")})
+        return out[:3]
 
     def _station(self) -> dict:
         st = self.st
@@ -343,5 +359,5 @@ async def run_loop(session: LiveSession, broadcast, tick_s: float = 1.0):
             if session.t - last_fuel_t >= 24:  # refresh Fuel Survival Score every 6 simulated hours
                 session.refresh_fuel(blocking=False)
                 last_fuel_t = session.t
-            await broadcast(session.overview())
+        await broadcast(session.overview())  # also while paused, so injected events and settings show at once
         await asyncio.sleep(max(0.05, tick_s - (asyncio.get_running_loop().time() - started)))

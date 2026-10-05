@@ -18,11 +18,11 @@ const SCENARIOS = [
   { key: 'wind_surplus', label: 'E · Wind surplus', proves: 'Power + heat co-optimisation', params: { hours: 24, speed_ms: 14 } },
   { key: 'sensor_loss', label: 'Sensor freezes', proves: 'Data validation', params: { metric: 'MET.wind_ms', mode: 'frozen', hours: 6 } },
   { key: 'fuel_leak', label: 'Fuel leak', proves: 'Fuel accounting', params: { litres: 3000, hours: 6 } },
-  { key: 'optimizer_failure', label: 'Optimiser crash', proves: 'Fallback in one cycle', params: { seconds: 8 } },
+  { key: 'optimizer_failure', label: 'Optimiser crash', proves: 'Fallback in one cycle', params: { hours: 2 } },
 ]
 
 const ROWS: [string, string, (v: number) => string][] = [
-  ['Diesel used', 'fuel_l', (v) => fmt.l(v)],
+  ['Diesel used', 'fuel_l', (v) => fmt.kl(v)],
   ['CO₂', 'co2_t', (v) => `${v.toFixed(0)} t`],
   ['Renewable fraction (power + heat)', 'renewable_fraction', (v) => fmt.pct(v, 1)],
   ['Renewables curtailed', 'curtailed_pct', (v) => `${v.toFixed(1)}%`],
@@ -42,15 +42,22 @@ export default function Lab({ onInjected }: { onInjected: (tab: string) => void 
   const [msg, setMsg] = useState<string | null>(null)
   const timer = useRef<number | undefined>(undefined)
   const n = y?.daily.date.length ?? 0
+  const shownOnce = useRef(false)
+  useEffect(() => { // open on the finished year; "Replay" animates it from 1 January
+    if (n && !shownOnce.current) { shownOnce.current = true; setDay(n - 1) }
+  }, [n])
 
-  useEffect(() => {
+  useEffect(() => { // clock-based: the replay always lasts 60 s, even if frames are slow or the tab is throttled
     if (!playing || !n) return
-    const per = 60000 / n
-    timer.current = window.setInterval(() => setDay((d) => {
-      if (d + 1 >= n) { setPlaying(false); return n - 1 }
-      return d + 1
-    }), per)
+    const start = performance.now()
+    const from = day
+    timer.current = window.setInterval(() => {
+      const d = Math.min(n - 1, from + Math.floor(((performance.now() - start) / 60000) * n))
+      setDay(d)
+      if (d >= n - 1) setPlaying(false)
+    }, 100)
     return () => clearInterval(timer.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, n])
 
   const cum = useMemo(() => {
@@ -65,7 +72,8 @@ export default function Lab({ onInjected }: { onInjected: (tab: string) => void 
     onInjected(s.key === 'resupply_delay' ? 'fuel' : s.key === 'blizzard' || s.key === 'wind_surplus' ? 'forecast' : 'overview')
   }
 
-  const shown = cum.slice(0, day + 1)
+  // fixed full-year axis; days not yet replayed are blank
+  const shown = cum.map((c, i) => (i <= day ? c : { d: c.d, aurora: null, base: null }))
   const now = cum[day]
   return (
     <div className="grid gap-4">
@@ -86,8 +94,8 @@ export default function Lab({ onInjected }: { onInjected: (tab: string) => void 
           <Panel title={`A · Year in 60 seconds: ${y.year} weather at ${y.station[0].toUpperCase() + y.station.slice(1)}`}
             sub={`Full-year digital twin, 15-min physics, ${y.solver.solves.toLocaleString('en-IN')} MILP solves (mean ${y.solver.mean_s.toFixed(2)} s, ${y.solver.failures} failures). Simulated results, not a real-station claim.`}
             right={<div className="flex gap-2">
-              <button className="btn btn-primary" onClick={() => { if (day >= n - 1) setDay(0); setPlaying((p) => !p) }}>{playing ? 'Pause' : day >= n - 1 ? 'Replay' : 'Play year'}</button>
-              <button className="btn" onClick={() => { setPlaying(false); setDay(n - 1) }}>Skip to end</button>
+              <button className="btn btn-primary" onClick={() => { if (day >= n - 1) setDay(0); setPlaying((p) => !p) }}>{playing ? 'Pause' : day >= n - 1 ? 'Replay year' : 'Resume'}</button>
+              <button className="btn" disabled={day >= n - 1 && !playing} onClick={() => { setPlaying(false); setDay(n - 1) }}>Skip to end</button>
             </div>}>
             <div className="grid gap-4 grid-cols-2 lg:grid-cols-4 mb-4">
               <Stat label="Date" value={now ? new Date(now.d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '–'} />
@@ -100,7 +108,7 @@ export default function Lab({ onInjected }: { onInjected: (tab: string) => void 
             <ResponsiveContainer width="100%" height={280}>
               <ComposedChart data={shown} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid vertical={false} />
-                <XAxis dataKey="d" type="category" ticks={cum.filter((_, i) => i % 61 === 0).map((c) => c.d)} allowDuplicatedCategory={false}
+                <XAxis dataKey="d" type="category" interval={0} ticks={cum.filter((_, i) => i % 61 === 0).map((c) => c.d)}
                   tickFormatter={(s) => new Date(s).toLocaleDateString('en-GB', { month: 'short' })} />
                 <YAxis tickFormatter={(v) => `${(v / 1000).toFixed(0)} kL`} width={56} domain={[0, Math.ceil((cum[n - 1]?.base ?? 1) / 50000) * 50000]} />
                 <Tooltip {...tooltipStyle} labelFormatter={(l) => fmt.date(String(l))} formatter={(v) => fmt.kl(Number(v))} />
@@ -126,7 +134,7 @@ export default function Lab({ onInjected }: { onInjected: (tab: string) => void 
               </table>
             </div>
             <p className="mt-3">
-              Fuel saved <b className="num">{fmt.l(y.comparison.fuel_saved_l)}</b> ({y.comparison.fuel_saved_pct.toFixed(1)}%),
+              Fuel saved <b className="num">{fmt.kl(y.comparison.fuel_saved_l)}</b> ({y.comparison.fuel_saved_pct.toFixed(1)}%),
               CO₂ avoided <b className="num">{y.comparison.co2_avoided_t.toFixed(0)} t</b>,
               reserve days gained <b className="num">{y.comparison.reserve_days_gained.toFixed(0)}</b>. <span className="label">Simulated</span>
             </p>

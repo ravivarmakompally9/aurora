@@ -22,6 +22,14 @@ export default function Overview({ d, go }: { d: O; go: (tab: string) => void })
         </div>
       )}
 
+      {d.events.length > 0 && d.events[0].message && (
+        <div className="panel px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="label">Latest event</span>
+          <span className="num text-sm" style={{ color: 'var(--ink-2)' }}>{fmt.time(d.events[0].time)}</span>
+          <span>{d.events[0].message}</span>
+        </div>
+      )}
+
       <div className="grid gap-4 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
         <Panel>
           <div className="flex items-start justify-between gap-2">

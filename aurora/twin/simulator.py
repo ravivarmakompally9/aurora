@@ -27,6 +27,7 @@ class Setpoint:
     gen_kw: list[float]
     batt_kw: float = 0.0          # + charge, - discharge
     p2h_kw: float = 0.0
+    boiler_kw: float = 0.0        # planned boiler output (e.g. pre-heating the tank before a storm)
     water_kw: float = 0.0
     laundry_kw: float = 0.0
     shed_kw: dict = field(default_factory=dict)  # planned shedding per tier column
@@ -249,22 +250,25 @@ class Twin:
         # heat balance
         hd = self.heat[t]
         free = heat_rec + p2h * st.p2h_eff
-        tank_ch = tank_dis = boiler = dump = 0.0
+        tank_ch = tank_dis = dump = 0.0
         s.tank_kwh *= (1 - tk.loss_per_h * dt)
         tmin = tk.soc_min * tk.capacity_kwh
+        room = min(tk.max_charge_kw, max(0.0, (tk.capacity_kwh - s.tank_kwh) / dt)) if sp.use_tank else 0.0
+        # planned boiler heat is only burned where it is useful: meeting demand or charging the tank
+        boiler = float(np.clip(sp.boiler_kw, 0.0, min(st.boiler_max_kw, max(0.0, hd + room - free))))
         heat_unserved = 0.0
-        if free >= hd:
-            surplus = free - hd
-            if sp.use_tank:
-                tank_ch = min(surplus, tk.max_charge_kw, max(0.0, (tk.capacity_kwh - s.tank_kwh) / dt))
+        if free + boiler >= hd:
+            surplus = free + boiler - hd
+            tank_ch = min(surplus, room)
             dump = surplus - tank_ch
         else:
-            gap = hd - free
+            gap = hd - free - boiler
             if sp.use_tank:
                 tank_dis = min(gap, tk.max_discharge_kw, max(0.0, (s.tank_kwh - tmin) / dt))
             gap -= tank_dis
-            boiler = min(gap, st.boiler_max_kw)
-            heat_unserved = gap - boiler
+            extra = min(gap, st.boiler_max_kw - boiler)
+            boiler += extra
+            heat_unserved = gap - extra
         s.tank_kwh += (tank_ch - tank_dis) * dt
         fuel_boiler_lph = boiler / (st.boiler_eff * st.diesel_kwh_per_l)
 

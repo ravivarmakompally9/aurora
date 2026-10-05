@@ -25,6 +25,7 @@ def main(argv=None):
     a.add_argument("--port", type=int, default=8765)
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("pyomo").setLevel(logging.WARNING)  # HiGHS progress tables would bury real errors
 
     from aurora.config import load_station
     if args.cmd == "fetch-weather":

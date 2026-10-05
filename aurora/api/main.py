@@ -112,7 +112,8 @@ def fuel(refresh: bool = False):
     s = S()
     if refresh or s.fuel_result is None:
         s.refresh_fuel(blocking=True)
-    return {"settings": {**s.fuel, "resupply": s.fuel["resupply"].isoformat()}, "busy": s.fuel_busy, "result": s.fuel_result}
+    settings = {**s.fuel, "on_hand_kl": round(s.twin.state.fuel_l / 1000, 2), "resupply": s.fuel["resupply"].isoformat()}
+    return {"settings": settings, "busy": s.fuel_busy, "result": s.fuel_result}
 
 
 class FuelSettings(BaseModel):

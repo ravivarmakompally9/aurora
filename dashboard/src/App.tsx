@@ -24,6 +24,7 @@ export default function App() {
 
   const control = (action: string, value?: number) => post('/api/sim/control', { action, value })
   const step = data?.step ?? 0
+  const hour = Math.floor(step / 4) // detail screens refresh once per simulated hour (or on their timer)
 
   return (
     <div className="min-h-full">
@@ -72,8 +73,8 @@ export default function App() {
         {!data?.ready ? <Empty>Starting the station twin and forecasters…</Empty> : (
           <>
             {tab === 'overview' && <Overview d={data} go={setTab} />}
-            {tab === 'forecast' && <Forecast step={step} />}
-            {tab === 'decisions' && <Decisions step={step} />}
+            {tab === 'forecast' && <Forecast step={hour} />}
+            {tab === 'decisions' && <Decisions step={hour} />}
             {tab === 'fuel' && <Fuel />}
             {tab === 'lab' && <Lab onInjected={setTab} />}
           </>

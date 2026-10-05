@@ -82,6 +82,7 @@ def build_inputs(st: Station, twin, t: int, fc: dict, grid: Grid, sa: storm.Stor
     storm.apply(st, sa, soc_floor, tank_floor, min_units, reserve, grid.block_of, int(round(1 / st.dt_h)))
 
     avail = np.array([[twin.gen_trip_until[g] < i for i in idx] for g in range(len(st.gensets))], dtype=float)
+    min_units = np.minimum(min_units, avail.sum(axis=0))  # a standby unit can only be asked of units that exist
     return PlanInputs(
         load=load, load_p90=load90, heat=grid.agg(fc["heat_p50"]), pv=pv, wind=wind, ren_p10=ren10,
         tiers={k: grid.agg(twin.el[k][idx_fine]) for k in SHED_TIERS},
@@ -115,17 +116,20 @@ class AuroraController:
         self.solve_times: list[float] = []
         self.failures = 0
         self.force_fail = False   # test / demo hook: simulate optimiser failure
+        self.replan_requested = False
+        self.fail_until = -1      # demo hook: optimiser unavailable until this twin step
         self.seed = seed
 
     def plan_step(self, t: int) -> int:
         return self.grid.block_of(t - self.plan_t)
 
     def _replan(self, twin, t: int):
-        out = self.f.forecast(twin, t, self.grid.H, 1, seed=self.seed + t)
+        out = self.f.forecast(twin, t, self.grid.H, 1, seed=self.seed)
         fc = {k: (v[0] if isinstance(v, np.ndarray) and v.ndim == 2 else v) for k, v in out.items()}
         sa = storm.assess(self.st, fc, self.st.dt_h, float(twin.wx["wind10_ms"].iloc[t]), was_active=self.mode == "storm")
         x = build_inputs(self.st, twin, t, fc, self.grid, sa)
-        plan = self.milp.solve(x) if not self.force_fail else self.milp._failed("forced failure", 0.0, x)
+        down = self.force_fail or t < self.fail_until
+        plan = self.milp.solve(x) if not down else self.milp._failed("simulated optimiser crash", 0.0, x)
         self.solve_times.append(plan.solve_s)
         self.fc, self.storm = fc, sa
         prev_mode = self.mode
@@ -143,8 +147,13 @@ class AuroraController:
         if self.explainer:
             self.explainer.on_replan(twin, t, self, plan, prev_mode)
 
+    def request_replan(self):
+        """Re-plan at the next step (e.g. after an event), without discarding the current plan."""
+        self.replan_requested = True
+
     def decide(self, twin, t: int) -> Setpoint:
-        if t - self.plan_t >= self.replan_every or self.plan is None:
+        if t - self.plan_t >= self.replan_every or self.plan is None or self.replan_requested:
+            self.replan_requested = False
             self._replan(twin, t)
         if self.plan is None:
             sp = self.fallback.decide(twin, t)
@@ -156,7 +165,7 @@ class AuroraController:
             sp = Setpoint(
                 gen_on=[bool(p.u[g, k] > 0.5) for g in range(G)],
                 gen_kw=[float(p.p[g, k]) for g in range(G)],
-                batt_kw=float(p.ch[k] - p.dis[k]), p2h_kw=float(p.p2h[k]),
+                batt_kw=float(p.ch[k] - p.dis[k]), p2h_kw=float(p.p2h[k]), boiler_kw=float(p.boiler[k]),
                 water_kw=float(p.water[k]), laundry_kw=float(p.laundry[k]),
                 shed_kw={c: float(p.shed[c][k]) for c in SHED_TIERS},
                 turbines_on=bool(p.inputs.turbines_on[k] > 0.5), use_tank=True,

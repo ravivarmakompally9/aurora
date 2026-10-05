@@ -1,5 +1,6 @@
 """Phase 4 gate: optimiser speed, Storm Mode, guardrail, tier protection and fallback."""
 import numpy as np
+import pandas as pd
 import pytest
 
 from aurora.config import load_station
@@ -26,9 +27,10 @@ def test_live_48h_plan_solves_under_30s(st_f):
     assert max(c.solve_times) < 30
 
 
-def test_storm_mode_prepares_before_blizzard(st_f):
+@pytest.mark.parametrize("start", ["2023-01-20", "2023-10-05"])  # summer, and a cold-season case that once failed
+def test_storm_mode_prepares_before_blizzard(st_f, start):
     st, f = st_f
-    tw = Twin(st, start="2023-01-20", end="2023-01-25")
+    tw = Twin(st, start=start, end=pd.Timestamp(start) + pd.Timedelta(days=5))
     onset = 64  # 16 h ahead
     tw.inject("blizzard", t=onset, hours=30, peak_ms=34)
     c = AuroraController(st, f, blocks=YEAR_BLOCKS, replan_every=4)
@@ -38,7 +40,8 @@ def test_storm_mode_prepares_before_blizzard(st_f):
     assert blizzard - first_storm >= 12 / st.dt_h, "Storm Mode must activate at least 12 h before the blizzard"
     assert log.soc.iloc[blizzard] >= st.control.storm_soc_target - 0.05
     assert log.tank_soc.iloc[blizzard] >= st.control.storm_tank_target - 0.1
-    assert (log.gens_on.iloc[onset:onset + 100] >= 1).all(), "standby generator online through the storm"
+    in_storm = tw.wind10[log.t.to_numpy()] >= st.control.storm_wind_ms
+    assert (log.gens_on[in_storm] >= 1).all(), "standby generator online whenever blizzard winds blow"
     over = tw.hub_wind[log.t.to_numpy()] >= st.wind.cut_out_ms
     assert (log.wind_kw[over] == 0).all()
     assert log.unserved_tier1.sum() == 0
@@ -70,7 +73,7 @@ def test_fallback_within_one_cycle(st_f):
     assert sp.mode == "fallback" and sp.source == "fallback"
     assert any(cd["title"] == "Fallback to diesel-first" for cd in c.explainer.cards)
     c.force_fail = False
-    c.plan_t = -10 ** 9
+    c.request_replan()
     assert c.decide(tw, 5).source == "aurora"
 
 
@@ -88,3 +91,17 @@ def test_guardrail_blocks_unsafe_setpoints():
     assert out.shed_kw["el_tier1_kw"] == 0 and out.shed_kw["el_tier2_kw"] == 0
     assert any(out.gen_on[1:]), "reserve must be restored by starting a healthy unit"
     assert {"equipment_unavailable", "tier_protection", "spinning_reserve"} <= rules
+
+
+def test_all_generators_tripped_still_plans(st_f):
+    """With every unit out, AURORA must keep planning (battery, renewables, shedding) instead of failing."""
+    st, f = st_f
+    tw = Twin(st, start="2023-01-15", end="2023-01-17")
+    tw.reset(soc=st.battery.soc_emergency + 0.02)  # nearly empty battery: water quota cannot be met
+    for g in range(len(st.gensets)):
+        tw.inject("generator_failure", t=0, hours=12, gen=g)
+    tw.inject("blizzard", t=8, hours=20, peak_ms=30)  # Storm Mode wants a standby unit that does not exist
+    c = AuroraController(st, f, blocks=YEAR_BLOCKS, replan_every=4)
+    log = tw.run(c, 0, 24)
+    assert c.failures == 0 and (log["mode"] != "fallback").all()
+    assert log.gen_kw.max() == 0

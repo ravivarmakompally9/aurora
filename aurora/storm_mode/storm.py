@@ -56,12 +56,16 @@ def assess(st: Station, fc: dict, step_h: float, wind_now_ms: float, was_active:
     while end + 1 < len(prob) and prob[end + 1] >= END_PROB:
         end += 1
     pmax = float(prob[onset:end + 1].max(initial=prob[onset]))
-    peak = float(wind10[onset:end + 1].max(initial=wind10[onset]))
+    smooth = np.convolve(wind10, np.ones(12) / 12, mode="same")  # 3 h mean: the forecast's best estimate
+    peak = float(smooth[onset:end + 1].max(initial=smooth[onset]))
     hrs = float(lead[onset])
     if now:
         msg = f"Blizzard in progress: wind {wind_now_ms:.0f} m/s. Storm Mode holding reserves."
     else:
-        msg = f"Blizzard probability {pmax:.0%} in {hrs:.0f} h (peak about {peak:.0f} m/s). Storm Mode activated."
+        # a single forecast run is too uncertain this far out to quote one peak number; say what matters
+        severity = ", strong enough to stop the wind turbines" if peak >= st.wind.cut_out_ms else ""
+        msg = (f"Blizzard probability {pmax:.0%}: wind above {st.control.storm_wind_ms:.0f} m/s in {hrs:.0f} h"
+               f"{severity}. Storm Mode activated.")
     return StormAssessment(True, onset, end, hrs, pmax, peak, park, msg)
 
 

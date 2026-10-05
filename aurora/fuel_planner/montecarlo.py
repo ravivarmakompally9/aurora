@@ -93,6 +93,8 @@ def surrogates(key: str, year: int | None = None) -> dict[str, Surrogate]:
     if not path.exists():
         raise FileNotFoundError(f"{path} missing: run `aurora year --station {key}` first")
     d = pd.read_csv(path, parse_dates=["date"]).set_index("date")
+    if "hours" in d:
+        d = d[d.hours == 24]  # fit on whole days only
     cl = climate(key)
     dem = daily_demand(st, pd.DatetimeIndex(d.index))
     # daily heat and renewables from the same simulated year

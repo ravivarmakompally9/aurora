@@ -35,18 +35,34 @@ def target_index(t0: np.ndarray, horizon: int, stride: int) -> np.ndarray:
     return t0[:, None] + stride * np.arange(horizon)[None, :]
 
 
+NWP_CYCLE_H = 6  # weather centres issue a new run every 6 h; forecasts in between reuse it
+
+
 def nwp(twin, t0: np.ndarray, horizon: int, stride: int, seed: int = 0) -> dict[str, np.ndarray]:
-    """Synthetic NWP issued at each t0 for `horizon` steps of `stride` twin steps."""
+    """Synthetic NWP valid at each t0, for `horizon` steps of `stride` twin steps.
+
+    Errors belong to the 6-hourly NWP run in force at t0 (seeded by that run), so consecutive
+    re-plans see the same forecast until a new run arrives, as on a real station.
+    """
     st = twin.st
     idx = np.minimum(target_index(t0, horizon, stride), twin.n - 1)
-    lead_h = (idx - t0[:, None]) * st.dt_h + st.dt_h  # the current step is still a short-range forecast
-    rho = np.exp(-stride * st.dt_h / 12.0)
-    rng = np.random.default_rng([seed, int(t0[0]), len(t0)])
-    z = rng.standard_normal((3, len(t0), horizon))
-    e = np.empty_like(z)
-    e[:, :, 0] = z[:, :, 0]
-    for k in range(1, horizon):
-        e[:, :, k] = rho * e[:, :, k - 1] + np.sqrt(1 - rho ** 2) * z[:, :, k]
+    cycle = int(round(NWP_CYCLE_H / st.dt_h))
+    issue = t0 - t0 % cycle
+    off = t0 - issue
+    lead_h = (idx - issue[:, None]) * st.dt_h + st.dt_h
+    rho = np.exp(-st.dt_h / 12.0)
+    L = int(off.max()) + horizon * stride
+    e = np.empty((3, len(t0), horizon))
+    for ti in np.unique(issue):
+        # one stream per variable, so every re-plan inside this run reads the same numbers
+        z = np.stack([np.random.default_rng([seed, int(ti), v]).standard_normal(L) for v in range(3)])
+        ar = np.empty_like(z)
+        ar[:, 0] = z[:, 0]
+        for k in range(1, L):
+            ar[:, k] = rho * ar[:, k - 1] + np.sqrt(1 - rho ** 2) * z[:, k]
+        rows = np.flatnonzero(issue == ti)
+        cols = off[rows][:, None] + stride * np.arange(horizon)[None, :]
+        e[:, rows, :] = ar[:, cols]
     wx = twin.wx
     temp = wx["temp_c"].to_numpy()[idx] + e[0] * sigma_temp(lead_h)
     wind10 = wx["wind10_ms"].to_numpy()[idx] * np.exp(e[1] * sigma_logwind(lead_h) - 0.5 * sigma_logwind(lead_h) ** 2)

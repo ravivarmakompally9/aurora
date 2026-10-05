@@ -66,3 +66,17 @@ def test_storm_forecast_flags_blizzard_and_cut_out():
     assert fc.storm_prob.iloc[64 + 40:64 + 80].max() > 0.8
     assert fc.storm_prob.iloc[:32].max() < 0.5
     assert (fc.wind_p90[fc.hub_wind >= st.wind.cut_out_ms] == 0).all()
+
+
+def test_forecasts_consistent_within_an_nwp_cycle(setup):
+    """Re-plans inside one 6-hourly NWP run must see the same weather forecast (no flicker)."""
+    st, tw, f = setup
+    t0 = int(np.flatnonzero(tw.index.year == st.test_year)[4000])
+    t0 -= t0 % 24
+    a = f.forecast_frame(tw, t0 + 1)
+    b = f.forecast_frame(tw, t0 + 5)
+    common = a.index.intersection(b.index)
+    assert np.allclose(a.loc[common, "wind10"], b.loc[common, "wind10"])
+    c = f.forecast_frame(tw, t0 + 24)  # next run differs
+    common = a.index.intersection(c.index)
+    assert not np.allclose(a.loc[common, "wind10"], c.loc[common, "wind10"])

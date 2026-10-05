@@ -27,6 +27,8 @@ SHED_WEIGHT = {"el_tier4_kw": 2.0, "el_tier3_kw": 6.0, "el_tier2_kw": 200.0}  # 
 TIER1_WEIGHT = 1e6
 HEAT_UNSERVED_WEIGHT = 1e4
 SOC_SLACK_WEIGHT = 2.0
+RESERVE_SHORT_WEIGHT = 50.0
+WATER_SHORT_WEIGHT = 500.0   # water is life support: postponed only when there is no power to make it  # litres-equivalent per kWh of missing reserve: only used when nothing else is possible
 MAX_DAYS = 4
 
 
@@ -164,6 +166,9 @@ class DispatchMILP:
         m.shed = pe.Var(m.K, m.T, within=pe.NonNegativeReals)
         m.t1unserved = pe.Var(m.T, within=pe.NonNegativeReals)
         m.resbatt = pe.Var(m.T, within=pe.NonNegativeReals)
+        m.resshort = pe.Var(m.T, within=pe.NonNegativeReals)  # reserve the plant cannot provide (e.g. all units tripped)
+        m.wshort = pe.Var(m.D, within=pe.NonNegativeReals)   # water energy that cannot be produced in time
+        m.lshort = pe.Var(m.D, within=pe.NonNegativeReals)
         m.endshort = pe.Var(within=pe.NonNegativeReals)
         m.tankshort = pe.Var(within=pe.NonNegativeReals)
 
@@ -197,12 +202,12 @@ class DispatchMILP:
         m.c_resb1 = pe.Constraint(m.T, rule=lambda m, t: m.resbatt[t] <= b.power_kw - m.dis[t])
         m.c_resb2 = pe.Constraint(m.T, rule=lambda m, t:
                                   m.resbatt[t] <= (m.soc[t] - b.soc_emergency * b.capacity_kwh) * b.eta_discharge / 0.5)
-        m.c_reserve = pe.Constraint(m.T, rule=lambda m, t: rated * m.n[t] - m.p[t] + m.resbatt[t] >= m.reserve[t])
+        m.c_reserve = pe.Constraint(m.T, rule=lambda m, t: rated * m.n[t] - m.p[t] + m.resbatt[t] + m.resshort[t] >= m.reserve[t])
 
         # deferrable energy per local-day window inside the horizon
-        m.c_wmin = pe.Constraint(m.D, rule=lambda m, d: sum(m.inday[d, t] * m.water[t] * dt[t] for t in m.T) >= m.wreq[d])
+        m.c_wmin = pe.Constraint(m.D, rule=lambda m, d: sum(m.inday[d, t] * m.water[t] * dt[t] for t in m.T) + m.wshort[d] >= m.wreq[d])
         m.c_wmax = pe.Constraint(m.D, rule=lambda m, d: sum(m.inday[d, t] * m.water[t] * dt[t] for t in m.T) <= m.wcap[d])
-        m.c_lmin = pe.Constraint(m.D, rule=lambda m, d: sum(m.inday[d, t] * m.laundry[t] * dt[t] for t in m.T) >= m.lreq[d])
+        m.c_lmin = pe.Constraint(m.D, rule=lambda m, d: sum(m.inday[d, t] * m.laundry[t] * dt[t] for t in m.T) + m.lshort[d] >= m.lreq[d])
         m.c_lmax = pe.Constraint(m.D, rule=lambda m, d: sum(m.inday[d, t] * m.laundry[t] * dt[t] for t in m.T) <= m.lcap[d])
 
         # terminal value: energy drawn from storage below its starting level must be paid back later
@@ -221,6 +226,8 @@ class DispatchMILP:
             + sum((TIER1_WEIGHT * m.t1unserved[t] + HEAT_UNSERVED_WEIGHT * m.hunserved[t]) * dt[t] for t in m.T)
             + sum((0.001 * m.curt[t] + 1e-4 * m.dump[t]) * dt[t] for t in m.T)
             + SOC_SLACK_WEIGHT * sum(m.socslack[t] + 0.2 * m.tankslack[t] for t in m.T1)
+            + RESERVE_SHORT_WEIGHT * sum(m.resshort[t] * dt[t] for t in m.T)
+            + sum(WATER_SHORT_WEIGHT * m.wshort[d] + SHED_WEIGHT["el_tier4_kw"] * m.lshort[d] for d in m.D)
             + val_el * m.endshort + val_th * m.tankshort,
             sense=pe.minimize)
         self.m = m

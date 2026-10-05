@@ -3,6 +3,7 @@ import asyncio
 import os
 from datetime import date
 
+import pandas as pd
 import pytest
 
 from aurora.fuel_planner import montecarlo as mc
@@ -110,3 +111,76 @@ def test_api_injections(client):
     r = client.post("/api/fuel/settings", json={"delay_days": 30})
     assert r.json()["result"]["aurora"]["score"] < 0.95
     assert client.post("/api/sim/inject", json={"type": "nope", "params": {}}).status_code == 400
+
+
+def test_year_daily_totals_match_kpis():
+    from aurora.config import load_station
+    from aurora.sim import daily
+    from aurora.twin.baseline import DieselFirst
+    from aurora.twin.simulator import Twin
+    st = load_station("bharati")
+    tw = Twin(st, start="2023-12-29", end="2023-12-31 23:45")
+    lb = tw.run(DieselFirst())
+    d = daily(st, lb, lb)
+    assert d.index.max() == pd.Timestamp("2023-12-31")
+    assert d.base_fuel_l.sum() == pytest.approx(lb.fuel_l.sum())
+
+
+def test_dashboard_updates_while_paused(client):
+    """An event injected while paused must reach the dashboard on the next push."""
+    import json
+    client.post("/api/sim/control", json={"action": "pause"})
+    with client.websocket_connect("/ws/live") as ws:
+        ws.receive_text()
+        client.post("/api/sim/inject", json={"type": "resupply_delay", "params": {"days": 7}})
+        for _ in range(20):
+            msg = json.loads(ws.receive_text())["data"]
+            if msg["events"] and "delayed by 7" in (msg["events"][0].get("message") or ""):
+                break
+        assert "delayed by 7" in msg["events"][0]["message"]
+
+
+def test_overview_alerts_recent_and_unique(client):
+    from aurora.api.main import STATE
+    s = STATE["session"]
+    ex = s.ctrl.explainer
+    for _ in range(3):
+        ex.cards.append({"time": "", "local": "", "step": s.t, "level": "warning", "kind": "storm",
+                         "title": "Storm Mode activated", "reason": "x", "fuel_impact_l": None})
+    ex.cards.insert(0, {"time": "", "local": "", "step": s.t - 500, "level": "critical", "kind": "x",
+                        "title": "Old alert", "reason": "x", "fuel_impact_l": None})
+    titles = [a["title"] for a in client.get("/api/state").json()["alerts"]]
+    assert titles.count("Storm Mode activated") == 1 and "Old alert" not in titles
+
+
+def test_views_work_after_injection_while_paused(client):
+    """Injecting an event before the next step must not break any screen."""
+    client.post("/api/sim/control", json={"action": "pause"})
+    for kind in ("blizzard", "generator_failure", "optimizer_failure"):
+        client.post("/api/sim/inject", json={"type": kind, "params": {}})
+        for path in ("/api/state", "/api/forecast", "/api/decisions"):
+            assert client.get(path).status_code == 200, (kind, path)
+
+
+def test_live_trip_and_optimizer_crash_show_cards(client):
+    from aurora.api.main import STATE
+    s = STATE["session"]
+    client.post("/api/sim/control", json={"action": "pause"})
+    for _ in range(40):  # run until a generator is online so the trip is visible
+        if s.twin.state.gen_on.any():
+            break
+        s.step()
+    running = int(s.twin.state.gen_on.argmax())
+    ev = client.post("/api/sim/inject", json={"type": "generator_failure", "params": {}}).json()
+    assert "while running" in ev["message"]
+    s.step()
+    titles = [c["title"] for c in client.get("/api/decisions").json()["cards"]]
+    assert f"{s.st.gensets[running].id} tripped" in titles
+    client.post("/api/sim/inject", json={"type": "optimizer_failure", "params": {"hours": 1}})
+    s.step()
+    assert client.get("/api/state").json()["mode"] == "fallback"
+    for _ in range(5):
+        s.step()
+    assert client.get("/api/state").json()["mode"] in ("normal", "storm")
+    titles = [c["title"] for c in client.get("/api/decisions").json()["cards"]]
+    assert "Fallback to diesel-first" in titles and "AURORA control restored" in titles

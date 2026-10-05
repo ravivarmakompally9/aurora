@@ -12,27 +12,27 @@ These are full-year results on 2023 NASA POWER weather at Bharati, AURORA agains
 
 | KPI (PRD §4) | Diesel-first | AURORA |
 |---|---|---|
-| Diesel used | 275,831 L | **215,567 L (−21.8%)** |
+| Diesel used | 275,831 L | **215,597 L (−21.8%)** |
 | CO₂ | 739 t | 578 t (−161 t) |
 | Renewable fraction (power + heat) | 14.7% | 19.5% |
-| Renewables curtailed | 24.7% | 0.1% |
+| Renewables curtailed | 24.7% | 0.0% |
 | Critical load served | 100% | 100% |
-| Generator run-hours | 9,367 | 3,410 |
-| Low-load hours (<40%, wet stacking) | 7,453 | 461 |
-| Mean generator loading | 35% | 79% |
-| Generator starts | 332 | 784 |
+| Generator run-hours | 9,367 | 3,424 |
+| Low-load hours (<40%, wet stacking) | 7,453 | 524 |
+| Mean generator loading | 35% | 78% |
+| Generator starts | 332 | 788 |
 | Reserve days gained at resupply | – | about 81 |
 
-How the year was run: 2,920 MILP solves (mean 0.95 s, 0 failures) in 7.4 min on 10 cores.
+How the year was run: 2,920 MILP solves (mean 0.90 s, 0 failures) in about 6.5 min on 10 cores.
 
 The trade-off is that AURORA starts generators more often, because it switches them off whenever the battery and renewables can carry the load. The optimiser charges a fuel-equivalent cost for every start, and the savings above are net of it.
 
 | Forecasting (test year 2023) | Result | PRD target |
 |---|---|---|
 | Load MAPE, 24 h ahead | 2.0% (persistence 7.6%) | < 10% |
-| Heat MAPE, 24 h ahead | 5.2% (persistence 8.5%) | – |
+| Heat MAPE, 24 h ahead | 5.3% (persistence 8.5%) | – |
 | P10–P90 coverage, load / heat | 80% / 76% | ≈ 80% |
-| 48 h plan, 15-min resolution, solve time | 0.3–0.7 s | < 30 s |
+| 48 h plan, 15-min resolution, solve time | 0.2–0.8 s | < 30 s |
 
 ## Quick start
 
@@ -56,7 +56,7 @@ uv run aurora serve
 
 Then open http://127.0.0.1:8765.
 
-- `aurora year` trains and calibrates the forecasters on first use (about 20 s), then runs the year comparison (about 7 min).
+- `aurora year` trains and calibrates the forecasters on first use (about 20 s), then runs the year comparison (about 6.5 min).
 - The fuel planner needs the year comparison's output, so run `aurora year` before `serve`.
 
 For other commands, see [CLAUDE.md](CLAUDE.md).
@@ -64,13 +64,14 @@ For other commands, see [CLAUDE.md](CLAUDE.md).
 ## Five-minute demo (PRD §14.4)
 
 1. **Hook.** Overview screen: Fuel Survival Score, fuel gauge, live energy flow.
-2. **Problem.** Simulation lab → **A · Year in 60 seconds**. Watch the diesel-first line pull away, then read the KPI table (curtailment, low-load hours).
+2. **Problem.** Simulation lab → **A · Year in 60 seconds** opens on the finished year. Press **Replay year** to watch the diesel-first line pull away, then read the KPI table (curtailment, low-load hours).
 3. **Solution.** Forecast & plan: demand, solar and wind bands, then the 48 h dispatch plan.
 4. **Live scenarios** in the Simulation lab:
-   - **B · Blizzard incoming:** Storm Mode switches on about 16 h ahead. The plan pre-charges the battery to 85% and heats the tank to 80% by 3 h before onset, keeps a standby generator online, and parks the turbines at cut-out. See Decisions for the reason cards.
-   - **C · Generator failure:** the remaining unit takes the load. Tier 1 is never shed.
+   - **B · Blizzard incoming:** winds start rising in 16 h and pass 20 m/s about 4–6 h later. Storm Mode switches on immediately. The plan pre-charges the battery to 85% and pre-heats the tank to 80% (using the boiler if needed) by 3 h before onset, keeps a standby generator online, and parks the turbines at cut-out. See Decisions for the reason cards. Tip: run at 60–120 min/s to reach the storm quickly.
+   - **C · Generator failure:** trips the running unit (or a standby one, and says so). A "G1 tripped" card appears, the battery covers the gap and another unit takes over. Tier 1 is never shed.
    - **D · Ship delayed 30 days:** the Fuel Survival Score falls from 99% to 0%. Ranked conservation actions appear, and an "escalate to HQ" prompt shows because even all actions together only reach about 88%.
-   - **E · Wind surplus**, a sensor freeze, a fuel leak, and an optimiser crash (falls back to diesel-first rules in one cycle).
+   - **E · Wind surplus**, a sensor freeze, a fuel leak, and an optimiser crash (falls back to diesel-first rules for 2 simulated hours, then recovers).
+   - Events can be injected while paused: the Overview shows each one in a "Latest event" line at once.
 5. **Impact.** Fuel saved, CO₂ avoided and reserve days gained, from the year run.
 
 ## How it works
@@ -101,7 +102,7 @@ Every 15 minutes AURORA runs one loop: **sense → predict → decide → guard 
 
 ## Tests
 
-`uv run pytest` runs 32 phase-gate tests in about 3.5 min. They cover:
+`uv run pytest` runs 40 tests in about 5 min. They cover:
 - energy and heat balance at every step;
 - a baseline year in under a minute;
 - MAPE below 10% and no lookahead in the forecasts;
@@ -113,7 +114,10 @@ Every 15 minutes AURORA runs one loop: **sense → predict → decide → guard 
 - the Fuel Survival Score falling with delay;
 - frozen and missing sensor handling;
 - the Modbus round trip;
-- the API end-to-end.
+- the API end-to-end, including injecting events while paused;
+- all generators tripped (the optimiser keeps planning instead of failing).
+
+A judge-style QA pass found and fixed 16 issues: see [docs/qa_report.md](docs/qa_report.md).
 
 Not verified: `docker compose up`, because Docker isn't installed on the development machine. The `Dockerfile` and `docker-compose.yml` are provided but untested.
 
