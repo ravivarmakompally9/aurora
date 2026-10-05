@@ -101,6 +101,8 @@ class Station:
     utc_offset_h: float
     gensets: tuple[Genset, ...]
     genset_start_cost_l: float
+    genset_start_wear_l: float
+    genset_min_up_h: float
     diesel_kwh_per_l: float
     pv: PV
     wind: Wind
@@ -146,6 +148,8 @@ def load_station(key_or_path: str | Path) -> Station:
         utc_offset_h=st.get("utc_offset_h", round(st["lon"] / 15)),
         gensets=tuple(Genset(**g) for g in c["gensets"]),
         genset_start_cost_l=c.get("genset_start_cost_l", 4.0),
+        genset_start_wear_l=c.get("genset_start_wear_l", 0.0),
+        genset_min_up_h=c.get("genset_min_up_h", 0.0),
         diesel_kwh_per_l=c.get("diesel_kwh_per_l", 10.0),
         pv=PV(**c["pv"]), wind=Wind(**c["wind"]), battery=Battery(**c["battery"]),
         tank=ThermalTank(**c["thermal_tank"]),

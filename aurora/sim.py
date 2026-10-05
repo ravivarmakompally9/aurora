@@ -6,6 +6,7 @@ Months run in parallel processes; each month starts both strategies from the sam
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -32,9 +33,14 @@ def _month_bounds(tw: Twin, year: int, month: int) -> tuple[int, int]:
     return int(sel[0]), int(sel[-1]) + 1
 
 
-def _run_month(args):
-    key, year, month, replan_h = args
+def _station(key: str, overrides: dict | None):
     st = load_station(key)
+    return dataclasses.replace(st, **overrides) if overrides else st
+
+
+def _run_month(args):
+    key, year, month, replan_h, overrides = args
+    st = _station(key, overrides)
     f = load_or_train(Twin(st))
     t_start = time.time()
     tb = Twin(st)
@@ -73,21 +79,25 @@ def daily(st, lb: pd.DataFrame, la: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, replan_h: float = 3.0) -> dict:
-    st = load_station(key)
+def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, replan_h: float = 3.0,
+             overrides: dict | None = None, tag: str = "") -> dict:
+    """`overrides` changes station fields for an experiment (e.g. genset_min_up_h); `tag` keeps its outputs separate."""
+    st = _station(key, overrides)
     year = year or st.test_year
     load_or_train(Twin(st))  # make sure the model is cached before workers start
     for var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
         os.environ[var] = "1"  # one process per core; avoid thread oversubscription in the workers
     t = time.time()
     with ProcessPoolExecutor(max_workers=workers) as ex:
-        parts = sorted(ex.map(_run_month, [(key, year, m, replan_h) for m in range(1, 13)]), key=lambda r: r["month"])
+        parts = sorted(ex.map(_run_month, [(key, year, m, replan_h, overrides) for m in range(1, 13)]),
+                       key=lambda r: r["month"])
     lb = pd.concat([p["base"] for p in parts])
     la = pd.concat([p["aurora"] for p in parts])
     kb, ka = kpis(st, lb), kpis(st, la)
     result = {
         "station": key, "year": year, "simulated": True, "wall_s": round(time.time() - t, 1),
         "replan_every_h": replan_h, "plan_grid": "hourly x 48 h",
+        "genset_min_up_h": st.genset_min_up_h, "start_cost_l": st.genset_start_cost_l + st.genset_start_wear_l,
         "solver": {"solves": sum(p["solves"] for p in parts), "failures": sum(p["failures"] for p in parts),
                    "mean_s": round(float(np.mean([p["solve_mean_s"] for p in parts])), 3),
                    "max_s": round(max(p["solve_max_s"] for p in parts), 2)},
@@ -96,11 +106,11 @@ def run_year(key: str = "bharati", year: int | None = None, workers: int = 10, r
     proc = DATA_DIR / "processed"
     proc.mkdir(parents=True, exist_ok=True)
     cards = [c for p in parts for c in p["cards"]]
-    with open(proc / f"year_{key}_{year}_logs.pkl", "wb") as fh:  # save the expensive part first
+    with open(proc / f"year_{key}_{year}{tag}_logs.pkl", "wb") as fh:  # save the expensive part first
         pickle.dump({"base": lb, "aurora": la, "cards": cards}, fh)
-    out_json = ROOT / "docs" / f"year_{key}_{year}.json"
+    out_json = ROOT / "docs" / f"year_{key}_{year}{tag}.json"
     out_json.write_text(json.dumps(result, indent=2, default=float))
-    daily(st, lb, la).to_csv(proc / f"year_{key}_{year}_daily.csv")
+    daily(st, lb, la).to_csv(proc / f"year_{key}_{year}{tag}_daily.csv")
     return result
 
 

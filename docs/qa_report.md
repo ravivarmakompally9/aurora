@@ -46,3 +46,26 @@
 
 ## Not tested
 - `docker compose up` (Docker is not installed on the development Mac).
+
+## Follow-up (same day): engine starts and life-support guarantee
+
+**Engine starts.** AURORA started generators 788 times a year against 332 for the baseline. Changes:
+- a 2 h minimum run time in the optimiser, including units already running when a plan begins;
+- the same rule in the safety guardrail, so units started between re-plans (by the guardrail or the PLC's emergency auto-start) also keep running;
+- a 6 L-equivalent wear cost per start, on top of the 4 L cold-start fuel.
+
+| | Starts | Runs < 2 h | Fuel saved | Diesel used |
+|---|---|---|---|---|
+| Before | 788 | not measured | 21.8% | 215,597 L |
+| 2 h, optimiser only | 646 | 115 | 21.5% | 216,591 L |
+| **2 h, optimiser + guardrail (current)** | **555** | **0** | **21.4%** | **216,847 L** |
+| Diesel-first baseline | 332 | 189 | – | 275,831 L |
+
+The saving fell by 0.4 points, so the 1 h variant was not needed. The second row showed that a plan-only rule leaves gaps: between 3-hourly re-plans, the stale plan switched off units the guardrail had just started.
+
+**Life-support guarantee.** The new tests found one real problem. In an energy emergency, the twin forced the water plant to run and fed it by cutting Tier 1. It now postpones water production first. Tier 1 is cut only for energy that physically does not exist, after power-to-heat, laundry, Tiers 4–2 and water production have all been cut. The optimiser already had this order (Tier 1 weight 10⁶ per kWh against 500 for postponing water).
+
+Related fixes:
+- the standby-unit and minimum-on requirements are now capped inside the optimiser itself;
+- `Twin` accepts timezone-aware start times;
+- planned shedding is logged per tier.

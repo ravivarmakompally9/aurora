@@ -43,6 +43,7 @@ class TwinState:
     tank_kwh: float
     fuel_l: float
     gen_on: np.ndarray
+    gen_on_since: np.ndarray = None   # twin step at which each running unit started
     water_done: float = 0.0
     laundry_done: float = 0.0
     day: int = -1
@@ -55,7 +56,9 @@ class Twin:
         wx = load_weather(st) if wx is None else wx
         demand = build_demand(st, wx, seed) if demand is None else demand
         if start is not None or end is not None:
-            sl = slice(pd.Timestamp(start, tz="UTC") if start else None, pd.Timestamp(end, tz="UTC") if end else None)
+            utc = lambda x: None if x is None else (pd.Timestamp(x).tz_convert("UTC") if pd.Timestamp(x).tzinfo
+                                                     else pd.Timestamp(x, tz="UTC"))
+            sl = slice(utc(start), utc(end))
             wx, demand = wx.loc[sl], demand.loc[sl]
         self.wx, self.demand = wx, demand
         self.events: list[dict] = []
@@ -93,7 +96,7 @@ class Twin:
         self.state = TwinState(
             soc_kwh=soc * st.battery.capacity_kwh, tank_kwh=tank * st.tank.capacity_kwh,
             fuel_l=(st.fuel.on_hand_kl * 1000 if fuel_l is None else fuel_l),
-            gen_on=np.zeros(len(st.gensets), bool))
+            gen_on=np.zeros(len(st.gensets), bool), gen_on_since=np.full(len(st.gensets), -10 ** 6))
         self.gen_trip_until[:] = -1
         self.leaks: list[tuple[int, int, float]] = []
         self.log: list[dict] = []
@@ -163,6 +166,7 @@ class Twin:
         # deferrable loads: controller choice, but the twin enforces completion by day end
         water = self._deferrable(t, sp.water_kw, "water")
         laundry = self._deferrable(t, sp.laundry_kw, "laundry")
+        water0, laundry0 = water, laundry
 
         # renewables
         pv = self.pv_avail[t]
@@ -192,6 +196,7 @@ class Twin:
         # primary response to close the electrical balance
         imb = p_gen.sum() + pv + wind - el_load - p2h - batt  # >0 surplus, <0 deficit
         curtail = 0.0
+        water_deferred = 0.0
         unserved = {c: 0.0 for c in TIERS}
         starts = 0
         if imb > 1e-9:
@@ -227,18 +232,23 @@ class Twin:
                 curtail = min(extra, pv + wind); extra -= curtail
                 p2h += extra
                 need = 0.0
-            if need > 1e-9:  # shed tier 4 -> 1
+            if need > 1e-9:
+                # Last resort, in priority order: power-to-heat, laundry, Tier 4, Tier 3, Tier 2,
+                # then postpone water production, and only then Tier 1 (nothing else left to cut).
                 p2h_cut = min(need, p2h); p2h -= p2h_cut; need -= p2h_cut
-                for c in TIERS:
-                    if need <= 1e-9:
-                        break
+                cut = min(need, laundry); laundry -= cut; need -= cut; s.laundry_done -= cut * dt; el_load -= cut
+                for c in TIERS[:-1]:
                     remaining = el[c] - shed.get(c, 0.0)
                     x = min(need, remaining); unserved[c] = x; need -= x
+                cut = min(need, water); water -= cut; need -= cut; s.water_done -= cut * dt; el_load -= cut
+                water_deferred = cut
+                x = min(need, el["el_tier1_kw"]); unserved["el_tier1_kw"] = x; need -= x
 
         # generator fuel and recovered heat
         fuel_gen_lph = np.where(on, np.array([g.a * g.rated_kw for g in gens]) + np.array([g.b for g in gens]) * p_gen, 0.0)
         heat_rec = float(np.sum(fuel_gen_lph * np.array([g.heat_recovery for g in gens]) * st.diesel_kwh_per_l))
         starts += int(np.sum(on & ~s.gen_on))
+        s.gen_on_since = np.where(on & ~s.gen_on, t, s.gen_on_since)
 
         # battery state
         if batt >= 0:
@@ -285,9 +295,10 @@ class Twin:
             "curtail_kw": curtail, "gen_kw": float(p_gen.sum()), "gens_on": int(on.sum()), "starts": starts,
             "gen_low_load": int(np.sum(on & (p_gen < 0.4 * rated))),
             "batt_kw": batt, "soc": s.soc_kwh / b.capacity_kwh if b.capacity_kwh else 0.0,
-            "el_load_kw": el_load, "el_demand_kw": sum(el.values()) + water + laundry,
-            "water_kw": water, "laundry_kw": laundry, "p2h_kw": p2h,
+            "el_load_kw": el_load, "el_demand_kw": sum(el.values()) + water0 + laundry0,
+            "water_kw": water, "water_deferred_kw": water_deferred, "laundry_kw": laundry, "p2h_kw": p2h,
             "shed_planned_kw": sum(shed.values()),
+            **{f"shed_{c[3:8]}": shed.get(c, 0.0) for c in TIERS[:-1]},
             **{f"unserved_{c[3:8]}": unserved[c] for c in TIERS},
             "heat_kw": hd, "heat_rec_kw": heat_rec, "p2h_heat_kw": p2h * st.p2h_eff, "tank_ch_kw": tank_ch,
             "tank_dis_kw": tank_dis, "boiler_kw": boiler, "heat_dump_kw": dump, "heat_unserved_kw": heat_unserved,

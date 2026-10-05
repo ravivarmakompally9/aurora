@@ -28,7 +28,7 @@ The files in `configs/*.yaml` are **representative values, not NCPOR's official 
 
 | Bharati-like | Value |
 |---|---|
-| Generators | 3 × 160 kW. Fuel L/h = 0.08 × rated + 0.246 × P (Willans line, HOMER default). Minimum load 30%. 45% of fuel energy recovered as heat |
+| Generators | 3 × 160 kW. Fuel L/h = 0.08 × rated + 0.246 × P (Willans line, HOMER default). Minimum load 30%. 45% of fuel energy recovered as heat. Minimum run time 2 h. Each start costs 4 L of cold-start fuel plus 6 L-equivalent of wear in the optimiser (wear is not counted as fuel in the KPIs) |
 | Solar PV | 80 kWp, tilted 65°, north-facing, snow albedo 0.8, −0.4 %/°C, 90% system derate |
 | Wind | 2 × 30 kW cold-climate turbines. Cut-in 3, rated 12, cut-out 25 m/s. 18 m hub, shear from the 10 m/50 m ratio. Density correction; 30% icing derate at −10…0 °C with RH ≥ 95% |
 | Battery | 500 kWh / 200 kW in a heated enclosure. 95%/95% efficiency. State of charge 20–95% in operation, 15% emergency floor. Wear cost 0.01 L/kWh |
@@ -92,7 +92,20 @@ AURORA and the baseline run on the same twin, weather, loads and events. Each si
 - **Other fuel use:** vehicles and incinerator use 150 L/day, ×1.6 in summer, the same for both strategies.
 - **Score:** the share of scenarios in which fuel never drops below the reserve before the ship arrives.
 
-## 7. What is not modelled
+## 7. Load priority in an energy emergency
+
+When there is not enough energy for everything (for example every generator tripped and the battery nearly empty), loads are cut in this order, in both the optimiser and the twin's emergency logic:
+1. Power-to-heat.
+2. Laundry.
+3. Tier 4 (comfort).
+4. Tier 3 (science).
+5. Tier 2 (comms and safety).
+6. Postponed water production.
+7. Tier 1, only for the energy that physically does not exist.
+
+`tests/test_tier1_protection.py` checks this at both levels.
+
+## 8. What is not modelled
 
 - Electrical transients below 15 minutes.
 - Battery degradation beyond a linear wear cost.

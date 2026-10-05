@@ -83,12 +83,20 @@ def build_inputs(st: Station, twin, t: int, fc: dict, grid: Grid, sa: storm.Stor
 
     avail = np.array([[twin.gen_trip_until[g] < i for i in idx] for g in range(len(st.gensets))], dtype=float)
     min_units = np.minimum(min_units, avail.sum(axis=0))  # a standby unit can only be asked of units that exist
+    # units already running that have not yet completed their minimum run time
+    up_steps = int(round(st.genset_min_up_h / st.dt_h))
+    min_on = np.zeros(T)
+    s = twin.state
+    for g in range(len(st.gensets)):
+        if s.gen_on[g] and s.gen_on_since is not None:
+            until = s.gen_on_since[g] + up_steps
+            min_on += ((idx < until) & (avail[g] > 0)).astype(float)
     return PlanInputs(
         load=load, load_p90=load90, heat=grid.agg(fc["heat_p50"]), pv=pv, wind=wind, ren_p10=ren10,
         tiers={k: grid.agg(twin.el[k][idx_fine]) for k in SHED_TIERS},
         day_of_step=d, water_req=wreq, water_cap=wcap, laundry_req=lreq, laundry_cap=lcap,
         soc0_kwh=twin.state.soc_kwh, tank0_kwh=twin.state.tank_kwh, gen_on0=twin.state.gen_on.astype(float),
-        gen_avail=avail, soc_floor=soc_floor, tank_floor=tank_floor, min_units=min_units,
+        gen_avail=avail, soc_floor=soc_floor, tank_floor=tank_floor, min_units=min_units, min_on=min_on,
         reserve=reserve, turbines_on=turb)
 
 

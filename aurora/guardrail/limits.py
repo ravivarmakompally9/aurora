@@ -43,6 +43,14 @@ class Guardrail:
             on &= avail
             out.append(self._v("equipment_unavailable", "warning",
                                f"{', '.join(gens[i].id for i in np.flatnonzero(bad))} unavailable; removed from dispatch"))
+        # minimum run time (equipment protection): a unit started less than min-up ago keeps running,
+        # whoever started it (plan, guardrail or the PLC's emergency auto-start)
+        up_steps = int(round(st.genset_min_up_h / st.dt_h))
+        if up_steps and s.gen_on_since is not None:
+            young = s.gen_on & avail & (t - s.gen_on_since < up_steps) & ~on
+            if young.any():
+                on |= young
+                kw = np.where(young, pmin, kw)
         kw = np.where(on, np.clip(kw, pmin, rated), 0.0)
 
         # tier 1 is never shed; tier 2 only by the PLC in a real deficit, never by plan

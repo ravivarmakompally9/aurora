@@ -20,6 +20,9 @@ def main(argv=None):
     a.add_argument("--year", type=int)
     a.add_argument("--workers", type=int, default=10)
     a.add_argument("--replan-h", type=float, default=3.0)
+    a.add_argument("--min-up-h", type=float, help="override the generator minimum run time (experiment)")
+    a.add_argument("--start-wear-l", type=float, help="override the per-start wear cost (experiment)")
+    a.add_argument("--tag", default="", help="suffix for output files, e.g. _minup1")
     a = sub.add_parser("serve", help="run the API server")
     a.add_argument("--host", default="127.0.0.1")
     a.add_argument("--port", type=int, default=8765)
@@ -43,7 +46,8 @@ def main(argv=None):
         print(json.dumps(report(st, Twin(st)), indent=2))
     elif args.cmd == "year":
         from aurora.sim import kpi_table, run_year
-        r = run_year(args.station, args.year, args.workers, args.replan_h)
+        ov = {k: v for k, v in (("genset_min_up_h", args.min_up_h), ("genset_start_wear_l", args.start_wear_l)) if v is not None}
+        r = run_year(args.station, args.year, args.workers, args.replan_h, ov or None, args.tag)
         print(kpi_table(r))
         print(f"\nsolver: {r['solver']}  wall {r['wall_s']} s")
     elif args.cmd == "serve":

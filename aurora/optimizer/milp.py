@@ -27,8 +27,8 @@ SHED_WEIGHT = {"el_tier4_kw": 2.0, "el_tier3_kw": 6.0, "el_tier2_kw": 200.0}  # 
 TIER1_WEIGHT = 1e6
 HEAT_UNSERVED_WEIGHT = 1e4
 SOC_SLACK_WEIGHT = 2.0
-RESERVE_SHORT_WEIGHT = 50.0
-WATER_SHORT_WEIGHT = 500.0   # water is life support: postponed only when there is no power to make it  # litres-equivalent per kWh of missing reserve: only used when nothing else is possible
+RESERVE_SHORT_WEIGHT = 50.0   # litres-equivalent per kWh of missing reserve: only used when nothing else is possible
+WATER_SHORT_WEIGHT = 500.0    # water is life support: postponed only after Tiers 4-2 are shed, before any other Tier 1 load
 MAX_DAYS = 4
 
 
@@ -54,6 +54,7 @@ class PlanInputs:
     soc_floor: np.ndarray       # per-step soft floor (kWh); Storm Mode raises it at onset
     tank_floor: np.ndarray
     min_units: np.ndarray       # per-step minimum online generators (Storm Mode standby)
+    min_on: np.ndarray          # per-step units that must stay on because they started less than min-up ago
     reserve: np.ndarray         # spinning reserve requirement kW
     turbines_on: np.ndarray     # 0/1
 
@@ -135,6 +136,7 @@ class DispatchMILP:
         m.socfloor = pe.Param(m.T1, mutable=True, initialize=0.0)
         m.tankfloor = pe.Param(m.T1, mutable=True, initialize=0.0)
         m.minunits = pe.Param(m.T, mutable=True, initialize=0.0)
+        m.minon = pe.Param(m.T, mutable=True, initialize=0.0)
         m.reserve = pe.Param(m.T, mutable=True, initialize=0.0)
         m.turb = pe.Param(m.T, mutable=True, initialize=1.0)
 
@@ -177,6 +179,12 @@ class DispatchMILP:
         m.c_avail = pe.Constraint(m.T, rule=lambda m, t: m.n[t] <= m.navail[t])
         m.c_start = pe.Constraint(m.T, rule=lambda m, t: m.s[t] >= m.n[t] - (m.n[t - 1] if t > 0 else m.n0))
         m.c_minunits = pe.Constraint(m.T, rule=lambda m, t: m.n[t] >= m.minunits[t])
+        # minimum run time: units started within the last min-up hours (in the plan or before it) stay on
+        t_start = np.r_[0.0, np.cumsum(dt)[:-1]]
+        up = st.genset_min_up_h
+        window = {t: [k for k in range(t + 1) if t_start[t] - t_start[k] < up - 1e-9] for t in range(T)}
+        m.c_minup = pe.Constraint(m.T, rule=lambda m, t: m.n[t] >= m.minon[t] + sum(m.s[k] for k in window[t])
+                                  if up > 0 else pe.Constraint.Skip)
 
         m.c_curt = pe.Constraint(m.T, rule=lambda m, t: m.curt[t] <= m.pv[t] + m.wind[t] * m.turb[t])
         m.c_shed = pe.Constraint(m.K, m.T, rule=lambda m, k, t: m.shed[k, t] <= m.tier[k, t])
@@ -220,7 +228,7 @@ class DispatchMILP:
         wear = b.wear_l_per_kwh
         m.obj = pe.Objective(expr=
             sum(((fa * m.n[t] + fb * m.p[t]) + boiler_l * m.boiler[t]) * dt[t] for t in m.T)
-            + st.genset_start_cost_l * sum(m.s[t] for t in m.T)
+            + (st.genset_start_cost_l + st.genset_start_wear_l) * sum(m.s[t] for t in m.T)
             + sum(wear * (m.ch[t] + m.dis[t]) * dt[t] for t in m.T)
             + sum(SHED_WEIGHT[k] * m.shed[k, t] * dt[t] for k in m.K for t in m.T)
             + sum((TIER1_WEIGHT * m.t1unserved[t] + HEAT_UNSERVED_WEIGHT * m.hunserved[t]) * dt[t] for t in m.T)
@@ -239,8 +247,12 @@ class DispatchMILP:
         for t in range(T):
             m.el[t] = float(x.load[t]); m.el90[t] = float(x.load_p90[t]); m.heat[t] = float(x.heat[t])
             m.pv[t] = float(x.pv[t]); m.wind[t] = float(x.wind[t]); m.ren10[t] = float(x.ren_p10[t])
-            m.minunits[t] = float(x.min_units[t]); m.reserve[t] = float(x.reserve[t]); m.turb[t] = float(x.turbines_on[t])
-            m.navail[t] = float(x.gen_avail[:, t].sum())
+            navail = float(x.gen_avail[:, t].sum())
+            m.navail[t] = navail
+            # never ask for more units than exist (e.g. Storm Mode standby with every generator tripped)
+            m.minunits[t] = min(float(x.min_units[t]), navail)
+            m.minon[t] = min(float(x.min_on[t]), navail)
+            m.reserve[t] = float(x.reserve[t]); m.turb[t] = float(x.turbines_on[t])
             for k in SHED_TIERS:
                 m.tier[k, t] = float(x.tiers[k][t])
             for d in range(MAX_DAYS):

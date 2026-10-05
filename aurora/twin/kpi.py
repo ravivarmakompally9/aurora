@@ -12,7 +12,8 @@ def kpis(st: Station, log: pd.DataFrame) -> dict:
     e = lambda col: float(log[col].sum() * dt)  # kWh
     unserved_el = {c: e(c) for c in log.columns if c.startswith("unserved_")}
     el_demand = e("el_demand_kw")
-    el_served = el_demand - log["shed_planned_kw"].sum() * dt - sum(unserved_el.values())
+    el_served = el_demand - log["shed_planned_kw"].sum() * dt - sum(unserved_el.values()) - (
+        e("water_deferred_kw") if "water_deferred_kw" in log else 0.0)
     heat_served = e("heat_kw") - e("heat_unserved_kw")
     ren_avail = e("pv_avail_kw") + e("wind_avail_kw")
     ren_used = e("pv_kw") + e("wind_kw") - e("curtail_kw")
@@ -37,6 +38,7 @@ def kpis(st: Station, log: pd.DataFrame) -> dict:
         "critical_served_pct": 100 * float(crit_ok.mean()),
         "unserved_tier1_kwh": unserved_el.get("unserved_tier1", 0.0),
         "unserved_kwh": sum(unserved_el.values()),
+        "water_deferred_kwh": e("water_deferred_kw") if "water_deferred_kw" in log else 0.0,
         "heat_unserved_kwh": e("heat_unserved_kw"),
         "gen_run_hours": float(running.sum() * dt),
         "gen_low_load_hours": float((running & (gen_load < 0.4)).sum() * dt),

@@ -105,3 +105,14 @@ def test_all_generators_tripped_still_plans(st_f):
     log = tw.run(c, 0, 24)
     assert c.failures == 0 and (log["mode"] != "fallback").all()
     assert log.gen_kw.max() == 0
+
+
+def test_guardrail_enforces_minimum_run_time():
+    st = load_station("bharati")
+    tw = Twin(st, start="2023-07-01", end="2023-07-02")
+    g = Guardrail(st)
+    tw.state.gen_on[:] = [True, False, False]
+    tw.state.gen_on_since[:] = [-2, -10 ** 6, -10 ** 6]  # G1 started 30 min before t=0
+    sp = Setpoint(gen_on=[False, False, False], gen_kw=[0, 0, 0], batt_kw=0)
+    out, _ = g.validate(tw, 0, sp)
+    assert out.gen_on[0], "a unit inside its minimum run time must not be stopped"

@@ -30,6 +30,7 @@ const ROWS: [string, string, (v: number) => string][] = [
   ['Generator run-hours', 'gen_run_hours', (v) => Math.round(v).toLocaleString('en-IN')],
   ['Low-load hours (<40%)', 'gen_low_load_hours', (v) => Math.round(v).toLocaleString('en-IN')],
   ['Mean generator loading', 'gen_mean_loading_pct', (v) => `${v.toFixed(0)}%`],
+  ['Generator starts (min. run 2 h)', 'gen_starts', (v) => Math.round(v).toLocaleString('en-IN')],
   ['Heat dumped', 'heat_dumped_mwh', (v) => `${v.toFixed(0)} MWh`],
   ['Power-to-heat', 'p2h_mwh', (v) => `${v.toFixed(0)} MWh`],
 ]

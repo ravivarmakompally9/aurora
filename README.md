@@ -12,20 +12,21 @@ These are full-year results on 2023 NASA POWER weather at Bharati, AURORA agains
 
 | KPI (PRD §4) | Diesel-first | AURORA |
 |---|---|---|
-| Diesel used | 275,831 L | **215,597 L (−21.8%)** |
-| CO₂ | 739 t | 578 t (−161 t) |
+| Diesel used | 275,831 L | **216,847 L (−21.4%)** |
+| CO₂ | 739 t | 581 t (−158 t) |
 | Renewable fraction (power + heat) | 14.7% | 19.5% |
-| Renewables curtailed | 24.7% | 0.0% |
+| Renewables curtailed | 24.7% | 0.1% |
 | Critical load served | 100% | 100% |
-| Generator run-hours | 9,367 | 3,424 |
-| Low-load hours (<40%, wet stacking) | 7,453 | 524 |
-| Mean generator loading | 35% | 78% |
-| Generator starts | 332 | 788 |
-| Reserve days gained at resupply | – | about 81 |
+| Generator run-hours | 9,367 | 3,552 |
+| Low-load hours (<40%, wet stacking) | 7,453 | 652 |
+| Mean generator loading | 35% | 75% |
+| Generator starts | 332 | 555 |
+| Generator runs shorter than 2 h | 189 | 0 |
+| Reserve days gained at resupply | – | about 79 |
 
 How the year was run: 2,920 MILP solves (mean 0.90 s, 0 failures) in about 6.5 min on 10 cores.
 
-The trade-off is that AURORA starts generators more often, because it switches them off whenever the battery and renewables can carry the load. The optimiser charges a fuel-equivalent cost for every start, and the savings above are net of it.
+The trade-off is engine starts: 555 a year against 332. AURORA switches units off whenever the battery and renewables can carry the load. To protect the engines, every start must run at least **2 hours** (enforced by both the plan and the safety guardrail), and each start costs 10 L-equivalent in the optimiser (4 L cold-start fuel plus 6 L of wear). That cut starts by 30% (from 788) for 0.4 points of saving (21.8% → 21.4%). In return, generator running hours fall by 62% (9,367 → 3,552 h), which is what drives overhaul intervals. Per unit that's about one start every two days. The baseline is left as today's practice: 189 of its runs last under 2 hours, and forcing longer runs on it would only raise its fuel use.
 
 | Forecasting (test year 2023) | Result | PRD target |
 |---|---|---|
@@ -102,7 +103,7 @@ Every 15 minutes AURORA runs one loop: **sense → predict → decide → guard 
 
 ## Tests
 
-`uv run pytest` runs 40 tests in about 5 min. They cover:
+`uv run pytest` runs 44 tests in about 3–5 min. They cover:
 - energy and heat balance at every step;
 - a baseline year in under a minute;
 - MAPE below 10% and no lookahead in the forecasts;
@@ -115,7 +116,9 @@ Every 15 minutes AURORA runs one loop: **sense → predict → decide → guard 
 - frozen and missing sensor handling;
 - the Modbus round trip;
 - the API end-to-end, including injecting events while paused;
-- all generators tripped (the optimiser keeps planning instead of failing).
+- all generators tripped (the optimiser keeps planning instead of failing);
+- Tier 1 (life support) is never cut while any Tier 2–4 load, laundry or water production is still powered;
+- the 2-hour minimum generator run time.
 
 A judge-style QA pass found and fixed 16 issues: see [docs/qa_report.md](docs/qa_report.md).
 

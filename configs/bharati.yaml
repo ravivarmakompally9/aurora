@@ -14,7 +14,9 @@ gensets:                   # Willans-line fuel curve: L/h = a * rated_kw * on + 
   - {id: G1, rated_kw: 160, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
   - {id: G2, rated_kw: 160, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
   - {id: G3, rated_kw: 160, a: 0.08, b: 0.246, min_load: 0.30, heat_recovery: 0.45}
-genset_start_cost_l: 4.0   # fuel-equivalent cost of one start (wear, cold-start enrichment)
+genset_start_cost_l: 4.0   # fuel burned by one cold start (enrichment, warm-up)
+genset_start_wear_l: 6.0   # engine wear of one cold start, in fuel-equivalent litres
+genset_min_up_h: 2.0       # a started generator runs at least this long
 diesel_kwh_per_l: 10.0     # lower heating value used for heat recovery and boiler
 
 pv:
