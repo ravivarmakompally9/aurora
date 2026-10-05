@@ -5,6 +5,8 @@ __pycache__/
 data/processed/*
 # the full-year daily summary is small and the fuel planner needs it (fresh clones, Codespaces)
 !data/processed/year_bharati_2023_daily.csv
+# the trained forecaster ships in the Docker image (Render): training at start-up takes minutes
+!data/processed/forecaster_bharati.pkl
 data/synthetic/
 *.db
 *.db-journal

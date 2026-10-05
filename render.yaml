@@ -1,0 +1,18 @@
+# Render Blueprint: the live AURORA app (API + dashboard + WebSocket) from the Dockerfile.
+# New > Blueprint in Render, pick this repo. The recorded demo is on Vercel (dashboard/vercel.json).
+# The free plan sleeps after 15 idle minutes and has 0.1 CPU, so the twin runs slowly there;
+# the simulation restarts from its default day after every sleep or deploy.
+services:
+  - type: web
+    name: aurora
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: AURORA_STATION
+        value: bharati
+      - key: AURORA_MODBUS  # the Modbus link needs a TCP port Render does not expose
+        value: "0"

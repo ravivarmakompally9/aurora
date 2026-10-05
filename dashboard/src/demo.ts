@@ -3,7 +3,9 @@ import type { Overview } from './api'
 /** Static demo build (GitHub Pages): the dashboard replays recorded runs of the digital twin
  *  instead of talking to the Python server. Built with VITE_STATIC=1. */
 export const STATIC = import.meta.env.VITE_STATIC === '1'
-export const LIVE_APP_URL = 'https://codespaces.new/ravivarmakompally9/aurora'
+/** Where the demo sends people for the live app: the Render deployment when VITE_LIVE_URL is set at build
+ *  time (Vercel or GitHub Pages), otherwise GitHub Codespaces. */
+export const LIVE_APP_URL = import.meta.env.VITE_LIVE_URL || 'https://codespaces.new/ravivarmakompally9/aurora'
 
 type Scenario = {
   frames: Overview[]

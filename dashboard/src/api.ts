@@ -58,7 +58,7 @@ export async function withProgress<T>(text: string, fn: () => Promise<T>): Promi
 export async function post<T>(path: string, body: unknown, timeoutMs = 180000): Promise<T> {
   if (STATIC) {
     try { return await demo.post(path, body as Record<string, unknown>) as T } catch (e) {
-      const msg = e instanceof LiveOnly ? `${e.message} This page is a recorded demo; run the live app in GitHub Codespaces: ${LIVE_APP_URL}` : (e as Error).message
+      const msg = e instanceof LiveOnly ? `${e.message} This page is a recorded demo; open the live app: ${LIVE_APP_URL}` : (e as Error).message
       notify(msg, e instanceof LiveOnly ? 'info' : 'critical')
       throw new Error(msg)
     }

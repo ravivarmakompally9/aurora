@@ -1,0 +1,13 @@
+.git/
+.venv/
+.claude/
+.pytest_cache/
+**/__pycache__/
+dashboard/node_modules/
+dashboard/dist/
+docs/screenshots/
+# data/processed holds large run logs and the live database; the image needs only these two
+data/processed/*
+!data/processed/forecaster_bharati.pkl
+!data/processed/year_bharati_2023_daily.csv
+data/synthetic/

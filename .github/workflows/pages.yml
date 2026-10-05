@@ -34,6 +34,7 @@ jobs:
         working-directory: dashboard
         env:
           VITE_STATIC: "1"
+          VITE_LIVE_URL: ${{ vars.LIVE_APP_URL }}  # the Render app; unset = Codespaces
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
