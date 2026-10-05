@@ -1,0 +1,49 @@
+{
+  "duration_s": 173.0,
+  "scenes": [
+    {
+      "scene": "1. Intro",
+      "start_s": 0.0
+    },
+    {
+      "scene": "2. Problem",
+      "start_s": 9.0
+    },
+    {
+      "scene": "3. Station now",
+      "start_s": 20.0
+    },
+    {
+      "scene": "4. Next 48 hours",
+      "start_s": 43.2
+    },
+    {
+      "scene": "5. Blizzard demo",
+      "start_s": 61.2
+    },
+    {
+      "scene": "6. Why AURORA acted",
+      "start_s": 83.1
+    },
+    {
+      "scene": "7. Generator failure",
+      "start_s": 95.1
+    },
+    {
+      "scene": "8. Ship delay \u2192 Will fuel last?",
+      "start_s": 109.8
+    },
+    {
+      "scene": "9. Year comparison",
+      "start_s": 128.5
+    },
+    {
+      "scene": "10. Results",
+      "start_s": 151.0
+    },
+    {
+      "scene": "11. Close",
+      "start_s": 164.0
+    }
+  ]
+}

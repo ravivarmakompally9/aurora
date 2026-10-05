@@ -16,3 +16,6 @@ dashboard/dist/
 
 # local Claude Code settings (machine-specific paths)
 .claude/
+
+# the demo video is published as a GitHub Release asset, not kept in git history
+demo_video/*.mp4
